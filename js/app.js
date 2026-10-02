@@ -29,9 +29,17 @@ function imagen(foto, alt, ancho) {
 }
 
 // Si una foto no carga, se pone el logo en su lugar.
+// Las fotos de Drive tienen un segundo intento con la miniatura de Drive.
 document.addEventListener('error', (e) => {
   const img = e.target;
-  if (img.tagName === 'IMG' && !img.classList.contains('sin-foto')) {
+  if (img.tagName !== 'IMG') return;
+  const drive = /lh3\.googleusercontent\.com\/d\/([\w-]+)=w(\d+)/.exec(img.src);
+  if (drive && !img.dataset.reintento) {
+    img.dataset.reintento = '1';
+    img.src = `https://drive.google.com/thumbnail?id=${drive[1]}&sz=w${drive[2]}`;
+    return;
+  }
+  if (!img.classList.contains('sin-foto')) {
     img.classList.add('sin-foto');
     img.src = LOGO;
   }
@@ -47,7 +55,7 @@ function guardarCache(crudo) {
 }
 
 async function pedirDatos() {
-  const url = modoDemo ? 'datos/demo.json' : CONFIG.endpoint;
+  const url = modoDemo ? 'datos/demo.json' : CONFIG.endpoint + (CONFIG.endpoint.includes('?') ? '&' : '?') + 'api';
   const ctrl = new AbortController();
   const limite = setTimeout(() => ctrl.abort(), 15000);
   try {

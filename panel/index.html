@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Panel Decorarte</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#f8d7e2">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="../img/favicon.png">
+  <link rel="apple-touch-icon" href="../img/logo-192.png">
+  <meta name="apple-mobile-web-app-title" content="Decorarte">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500;600&display=swap">
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+      font-family: Poppins, system-ui, sans-serif; font-size: 17px; line-height: 1.5; color: #4a3a40; text-align: center;
+      background: linear-gradient(160deg, #fffaf9, #fdf1f4 55%, #faeaee); background-color: #fffaf9;
+      box-sizing: border-box;
+    }
+    main { max-width: 420px; width: 100%; }
+    img { width: 128px; height: 128px; border-radius: 50%; box-shadow: 0 10px 30px rgba(214, 150, 170, .35); }
+    h1 { font-family: 'Playfair Display', serif; font-size: 26px; margin: 18px 0 6px; }
+    p { margin: 0 0 14px; color: #7d646c; }
+    .boton {
+      display: flex; align-items: center; justify-content: center; min-height: 58px; border-radius: 16px;
+      background: #c8457f; color: #fff; font-weight: 600; font-size: 18px; text-decoration: none;
+      box-shadow: 0 8px 20px rgba(200, 69, 127, .3); margin: 18px 0 10px;
+    }
+    .pasos { text-align: left; background: #fff; border-radius: 18px; padding: 16px 16px 16px 36px; box-shadow: 0 6px 18px rgba(214, 150, 170, .2); font-size: 15.5px; }
+    .pasos li { margin-bottom: 6px; }
+    small { color: #a88a93; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="../img/logo-192.png" alt="Decorarte">
+    <h1>Panel Decorarte</h1>
+    <p id="estado">Abriendo tu panel…</p>
+    <a class="boton" id="abrir" href="#" hidden>Abrir el panel</a>
+    <ol class="pasos" id="instalar" hidden>
+      <li><b>Android (Chrome):</b> menú <b>⋮</b> → <b>Agregar a la pantalla principal</b> o <b>Instalar app</b>.</li>
+      <li><b>iPhone (Safari):</b> botón <b>Compartir</b> → <b>Agregar a inicio</b>.</li>
+      <li>Te queda un ícono con tu logo. Tócalo para administrar tu catálogo.</li>
+    </ol>
+    <p><small>Solo pueden entrar los correos autorizados.</small></p>
+  </main>
+  <script type="module">
+    import { CONFIG } from '../js/config.js';
+    const estado = document.getElementById('estado');
+    const abrir = document.getElementById('abrir');
+    const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+
+    if (!CONFIG.panel) {
+      estado.textContent = 'El panel todavía no está conectado. Sigue el paso 7 de INSTALACION.md.';
+    } else {
+      abrir.href = CONFIG.panel;
+      abrir.hidden = false;
+      if (instalado) {
+        // Abierto desde el ícono: entra directo.
+        location.replace(CONFIG.panel);
+      } else {
+        // Abierto desde el navegador: primero se ofrece agregarlo a la pantalla de inicio.
+        estado.textContent = 'Agrega este acceso a tu pantalla de inicio para entrar con un toque.';
+        document.getElementById('instalar').hidden = false;
+      }
+    }
+  </script>
+</body>
+</html>

@@ -6,7 +6,7 @@
   "scripts": {
     "servir": "node tests/servidor.js",
     "test": "node --test \"tests/unit/*.test.js\"",
-    "test:navegador": "playwright test",
+    "test:navegador": "playwright test --project=celular --project=iphone",
     "test:todo": "npm test && npm run test:navegador",
     "capturas": "playwright test --project=capturas"
   },

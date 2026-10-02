@@ -1,0 +1,798 @@
+/**
+ * Decorarte · Panel de administración y datos del catálogo.
+ * Google Apps Script ligado a la hoja de cálculo de la dueña.
+ *
+ * Una sola copia de este código se publica dos veces (ver INSTALACION.md):
+ *  - "API catálogo": Ejecutar como YO · Acceso: Cualquier persona.
+ *     El catálogo pide  <url>/exec?api  y recibe el JSON público (con caché).
+ *  - "Panel": Ejecutar como USUARIO QUE ACCEDE · Acceso: Cualquier usuario con cuenta de Google.
+ *     Solo entran los correos de "autorizados" en la pestaña Configuración.
+ */
+
+const HOJA_PRODUCTOS = 'Productos';
+const HOJA_PAQUETES = 'Paquetes';
+const HOJA_CONFIG = 'Configuración';
+const URL_CATALOGO = 'https://tapqr-temascalcingo.github.io/decorarte-catalogo/';
+const URL_LOGO = URL_CATALOGO + 'img/logo-192.png';
+const NOMBRE_CARPETA = 'Decorarte Catálogo – Fotos';
+const CLAVE_CACHE = 'catalogo-v1';
+const DURACION_CACHE = 3600; // segundos; se borra en cuanto se guarda un cambio
+const TIPOS_PRECIO = ['fijo', 'desde', 'consultar'];
+
+// Columnas de cada pestaña: clave interna -> encabezado que se ve en la hoja.
+const COLUMNAS = {
+  [HOJA_PRODUCTOS]: [
+    ['id', 'ID'], ['nombre', 'Nombre'], ['descripcion', 'Descripción'], ['categoria', 'Categoría'],
+    ['ocasiones', 'Ocasiones'], ['tipoPrecio', 'Tipo de precio'], ['precio', 'Precio'], ['foto', 'Foto'],
+    ['disponible', 'Disponible'], ['destacado', 'Destacado'], ['orden', 'Orden'], ['actualizado', 'Actualizado'],
+  ],
+  [HOJA_PAQUETES]: [
+    ['id', 'ID'], ['servicioId', 'Servicio (ID)'], ['nombre', 'Nombre'], ['descripcion', 'Descripción'],
+    ['incluye', 'Incluye'], ['tipoPrecio', 'Tipo de precio'], ['precio', 'Precio'],
+    ['disponible', 'Disponible'], ['orden', 'Orden'], ['actualizado', 'Actualizado'],
+  ],
+};
+
+// Claves de Configuración que se publican en el catálogo. Las demás (autorizados, carpeta) son privadas.
+const CONFIG_PUBLICA = [
+  'negocio', 'lema', 'whatsapp', 'whatsappServicios', 'instagram', 'facebook', 'resenas',
+  'direccion', 'mapsUrl', 'horario', 'categorias', 'ocasiones', 'temporada', 'temporadaTitulo',
+];
+
+const CONFIG_INICIAL = [
+  ['negocio', 'Decorarte', 'Nombre del negocio'],
+  ['lema', 'Regalos, decoración y eventos con amor', 'Frase bajo el logo'],
+  ['whatsapp', '527122319080', 'Número para pedidos (52 + 10 dígitos)'],
+  ['whatsappServicios', '', 'Opcional: otro número solo para cotizar servicios'],
+  ['instagram', 'https://www.instagram.com/decorartetemas', ''],
+  ['facebook', 'https://www.facebook.com/profile.php?id=100064143365816', ''],
+  ['resenas', 'https://search.google.com/local/writereview?placeid=ChIJVQZ5CMX70oURISEiY5jII1g', 'Enlace para dejar reseña en Google'],
+  ['direccion', 'Temascalcingo, Estado de México', ''],
+  ['mapsUrl', '', 'Enlace de Google Maps (opcional)'],
+  ['horario', '', 'Opcional, p. ej. "Lunes a sábado de 10 a 8"'],
+  ['categorias', 'regalos | Regalos | productos\nservicios | Servicios | servicios', 'Una por renglón: id | nombre | tipo (productos o servicios)'],
+  ['ocasiones', [
+    'baby-shower | 🍼 | Baby shower', 'aniversario | 💍 | Aniversario', 'san-valentin | 💘 | San Valentín',
+    '10-de-mayo | 🌷 | 10 de mayo', 'dia-del-padre | 👔 | Día del Padre', 'graduaciones | 🎓 | Graduaciones',
+  ].join('\n'), 'Una por renglón: id | emoji | nombre'],
+  ['temporada', '', 'ID de la ocasión destacada en el catálogo (vacío = sin sección de temporada)'],
+  ['temporadaTitulo', '', 'Título de la sección de temporada (opcional)'],
+  ['autorizados', '', 'Correos que pueden entrar al panel, uno por renglón'],
+  ['carpetaFotos', '', 'ID de la carpeta de Drive con las fotos (no modificar)'],
+];
+
+/* =====================================================================
+ *  Entradas web
+ * ===================================================================== */
+
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if ('api' in p) return respuestaApi_();
+
+  const correo = correoActual_();
+  if (!estaAutorizado_(correo)) return paginaSinAcceso_(correo);
+
+  const plantilla = HtmlService.createTemplateFromFile('Panel');
+  plantilla.correo = correo;
+  plantilla.urlCatalogo = URL_CATALOGO;
+  plantilla.urlLogo = URL_LOGO;
+  return plantilla.evaluate()
+    .setTitle('Decorarte · Panel')
+    .setFaviconUrl(URL_LOGO)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+}
+
+/** Para insertar archivos HTML dentro de otros: <?!= incluir('PanelEstilos') ?> */
+function incluir(nombre) {
+  return HtmlService.createHtmlOutputFromFile(nombre).getContent();
+}
+
+function respuestaApi_() {
+  let texto;
+  try {
+    texto = jsonPublicoConCache_();
+  } catch (err) {
+    texto = JSON.stringify({ error: 'No se pudo leer el catálogo: ' + err.message });
+  }
+  return ContentService.createTextOutput(texto).setMimeType(ContentService.MimeType.JSON);
+}
+
+function paginaSinAcceso_(correo) {
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500&display=swap" rel="stylesheet">
+    <style>body{font-family:Poppins,sans-serif;background:linear-gradient(160deg,#fffaf9,#faeaee);color:#4a3a40;
+    display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
+    img{width:120px;border-radius:50%}h1{font-family:'Playfair Display',serif;font-size:24px}
+    p{font-size:17px;line-height:1.5;max-width:420px}.correo{overflow-wrap:anywhere}a{color:#c8457f;font-weight:500}</style></head><body><div>
+    <img src="${URL_LOGO}" alt="Decorarte"><h1>Este panel es privado</h1>
+    ${correo
+      ? `<p>Entraste como <b class="correo">${escaparHtml_(correo)}</b>, y ese correo no está autorizado.</p>
+         <p>Pide a la dueña que lo agregue en <b>Ajustes → Personas con acceso</b>, o cambia de cuenta de Google.</p>`
+      : '<p>Entra con tu cuenta de Google autorizada para administrar el catálogo.</p>'}
+    <p><a href="${URL_CATALOGO}">Ver el catálogo</a></p></div></body></html>`;
+  return HtmlService.createHtmlOutput(html).setTitle('Decorarte · Panel')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/* =====================================================================
+ *  Menú en la hoja e instalación
+ * ===================================================================== */
+
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('Decorarte')
+    .addItem('1. Preparar hoja (instalar)', 'instalar')
+    .addItem('Cargar productos de ejemplo', 'cargarEjemplos')
+    .addItem('Publicar cambios hechos a mano en la hoja', 'publicarCambios')
+    .addToUi();
+}
+
+/** Si alguien edita la hoja a mano, el catálogo se actualiza al momento. */
+function onEdit() {
+  invalidarCache_();
+}
+
+function publicarCambios() {
+  invalidarCache_();
+  avisar_('Listo: el catálogo ya muestra la información actual de la hoja.');
+}
+
+/**
+ * Crea las pestañas, encabezados, configuración inicial y la carpeta de fotos.
+ * Se puede ejecutar varias veces: no borra nada que ya exista.
+ */
+function instalar() {
+  const libro = libro_();
+  PropertiesService.getScriptProperties().setProperties({
+    idHoja: libro.getId(),
+    propietario: (Session.getEffectiveUser().getEmail() || '').toLowerCase(),
+  });
+
+  [HOJA_PRODUCTOS, HOJA_PAQUETES].forEach((nombre) => {
+    const hoja = libro.getSheetByName(nombre) || libro.insertSheet(nombre);
+    const columnas = COLUMNAS[nombre];
+    if (hoja.getLastRow() === 0) {
+      hoja.getRange(1, 1, 1, columnas.length).setValues([columnas.map((c) => c[1])]);
+    }
+    hoja.setFrozenRows(1);
+    hoja.getRange(1, 1, 1, columnas.length).setFontWeight('bold').setBackground('#f8d7e2');
+    // Texto plano para que Sheets no convierta IDs ni listas en números o fechas.
+    ['id', 'servicioId', 'ocasiones', 'foto', 'incluye', 'categoria'].forEach((clave) => {
+      const i = columnas.findIndex((c) => c[0] === clave);
+      if (i >= 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
+    });
+  });
+
+  const hojaConfig = libro.getSheetByName(HOJA_CONFIG) || libro.insertSheet(HOJA_CONFIG);
+  if (hojaConfig.getLastRow() === 0) {
+    hojaConfig.getRange(1, 1, 1, 3).setValues([['Clave', 'Valor', 'Nota']]).setFontWeight('bold').setBackground('#f8d7e2');
+    hojaConfig.setFrozenRows(1);
+  }
+  hojaConfig.getRange('B:B').setNumberFormat('@').setWrap(true);
+  const existente = leerConfigCruda_();
+  const faltantes = CONFIG_INICIAL.filter((fila) => !(fila[0] in existente));
+  if (faltantes.length) {
+    hojaConfig.getRange(hojaConfig.getLastRow() + 1, 1, faltantes.length, 3).setValues(faltantes);
+  }
+
+  const config = leerConfigCruda_();
+  if (!lineas_(config.autorizados).length) {
+    guardarClavesConfig_({ autorizados: PropertiesService.getScriptProperties().getProperty('propietario') });
+  }
+  carpetaFotos_();
+
+  const sobrante = libro.getSheetByName('Hoja 1') || libro.getSheetByName('Sheet1');
+  if (sobrante && libro.getSheets().length > 1 && sobrante.getLastRow() === 0) libro.deleteSheet(sobrante);
+
+  invalidarCache_();
+  avisar_('Listo. La hoja está preparada. Sigue con el paso "Publicar" de la guía de instalación.');
+}
+
+/** Carga los 8 productos y el servicio de ejemplo (solo si la hoja de productos está vacía). */
+function cargarEjemplos() {
+  const respuesta = UrlFetchApp.fetch(URL_CATALOGO + 'datos/demo.json', { muteHttpExceptions: true });
+  if (respuesta.getResponseCode() !== 200) throw new Error('No se pudieron descargar los ejemplos.');
+  const demo = JSON.parse(respuesta.getContentText());
+  if (leerTabla_(HOJA_PRODUCTOS).length) {
+    avisar_('La pestaña Productos ya tiene información; no se cargaron ejemplos.');
+    return;
+  }
+  const ahora = new Date().toISOString();
+  escribirFilas_(HOJA_PRODUCTOS, demo.productos.map((p) => Object.assign({}, p, { actualizado: ahora })));
+  escribirFilas_(HOJA_PAQUETES, demo.paquetes.map((k) => Object.assign({}, k, { actualizado: ahora })));
+  guardarClavesConfig_({ temporada: demo.config.temporada, temporadaTitulo: demo.config.temporadaTitulo });
+  invalidarCache_();
+  avisar_('Se cargaron los productos de ejemplo. Puedes editarlos o borrarlos desde el panel.');
+}
+
+function avisar_(mensaje) {
+  try { SpreadsheetApp.getUi().alert(mensaje); } catch (e) { Logger.log(mensaje); }
+}
+
+/* =====================================================================
+ *  Acceso
+ * ===================================================================== */
+
+function correoActual_() {
+  return (Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+}
+
+function estaAutorizado_(correo) {
+  if (!correo) return false;
+  const lista = lineas_(leerConfigCruda_().autorizados).map((c) => c.toLowerCase());
+  if (!lista.length) {
+    return correo === PropertiesService.getScriptProperties().getProperty('propietario');
+  }
+  return lista.indexOf(correo) >= 0;
+}
+
+function verificarAcceso_() {
+  if (!estaAutorizado_(correoActual_())) throw new Error('No tienes permiso para hacer cambios.');
+}
+
+/* =====================================================================
+ *  Lectura de la hoja
+ * ===================================================================== */
+
+function libro_() {
+  const activo = SpreadsheetApp.getActiveSpreadsheet();
+  if (activo) return activo;
+  const id = PropertiesService.getScriptProperties().getProperty('idHoja');
+  if (!id) throw new Error('Falta ejecutar "instalar" desde el editor de Apps Script.');
+  return SpreadsheetApp.openById(id);
+}
+
+function hoja_(nombre) {
+  const h = libro_().getSheetByName(nombre);
+  if (!h) throw new Error(`Falta la pestaña "${nombre}". Ejecuta "instalar".`);
+  return h;
+}
+
+function lineas_(texto) {
+  return String(texto == null ? '' : texto).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+function crearId_(texto) {
+  return String(texto == null ? '' : texto).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** "id | emoji | nombre" por renglón -> [{id, emoji, nombre}] */
+function parsearLista_(texto, campos) {
+  return lineas_(texto).map((linea) => {
+    const partes = linea.split('|').map((x) => x.trim());
+    const obj = {};
+    campos.forEach((campo, i) => { obj[campo] = partes[i] || ''; });
+    if (partes.length === 1) { obj.id = ''; obj.nombre = partes[0]; }
+    if (!obj.id) obj.id = crearId_(obj.nombre);
+    return obj;
+  }).filter((o) => o.id && o.nombre);
+}
+
+function listaATexto_(lista, campos) {
+  return lista.map((o) => campos.map((c) => String(o[c] || '').replace(/[|\n]/g, ' ').trim()).join(' | ')).join('\n');
+}
+
+function leerConfigCruda_() {
+  const h = libro_().getSheetByName(HOJA_CONFIG);
+  const config = {};
+  if (!h || h.getLastRow() < 2) return config;
+  h.getRange(2, 1, h.getLastRow() - 1, 2).getValues().forEach((fila) => {
+    const clave = String(fila[0]).trim();
+    if (clave) config[clave] = String(fila[1] == null ? '' : fila[1]);
+  });
+  return config;
+}
+
+/** Configuración con las listas ya convertidas. */
+function leerConfig_() {
+  const c = leerConfigCruda_();
+  return Object.assign({}, c, {
+    categorias: parsearLista_(c.categorias, ['id', 'nombre', 'tipo']).map((cat) => ({
+      id: cat.id, nombre: cat.nombre, tipo: cat.tipo === 'servicios' ? 'servicios' : 'productos',
+    })),
+    ocasiones: parsearLista_(c.ocasiones, ['id', 'emoji', 'nombre']),
+    autorizados: lineas_(c.autorizados).map((x) => x.toLowerCase()),
+  });
+}
+
+function configPublica_(config) {
+  const pub = {};
+  CONFIG_PUBLICA.forEach((clave) => { if (clave in config) pub[clave] = config[clave]; });
+  return pub;
+}
+
+function aBooleano_(v, porDefecto) {
+  if (v === '' || v == null) return porDefecto;
+  if (typeof v === 'boolean') return v;
+  return ['true', 'verdadero', 'si', 'sí', '1', 'x'].indexOf(String(v).trim().toLowerCase()) >= 0;
+}
+
+function aNumero_(v) {
+  if (v === '' || v == null) return null;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[$,\s]/g, ''));
+  return isFinite(n) ? n : null;
+}
+
+/** Convierte una fila de la hoja en objeto, según los encabezados. */
+function filaAObjeto_(fila, claves) {
+  const o = {};
+  claves.forEach((clave, i) => { if (clave) o[clave] = fila[i]; });
+  const r = {
+    id: String(o.id == null ? '' : o.id).trim(),
+    nombre: String(o.nombre == null ? '' : o.nombre).trim(),
+    descripcion: String(o.descripcion == null ? '' : o.descripcion).trim(),
+    tipoPrecio: TIPOS_PRECIO.indexOf(o.tipoPrecio) >= 0 ? o.tipoPrecio : 'fijo',
+    precio: aNumero_(o.precio),
+    disponible: aBooleano_(o.disponible, true),
+    orden: aNumero_(o.orden),
+    actualizado: o.actualizado instanceof Date ? o.actualizado.toISOString() : String(o.actualizado || ''),
+  };
+  if ('categoria' in o) {
+    r.categoria = String(o.categoria || '').trim();
+    r.ocasiones = String(o.ocasiones || '').split(',').map((x) => x.trim()).filter(Boolean);
+    r.foto = String(o.foto || '').trim();
+    r.destacado = aBooleano_(o.destacado, false);
+  }
+  if ('servicioId' in o) {
+    r.servicioId = String(o.servicioId || '').trim();
+    r.incluye = lineas_(o.incluye);
+  }
+  if (r.precio === null && r.tipoPrecio !== 'consultar') r.tipoPrecio = 'consultar';
+  return r;
+}
+
+/** Convierte un objeto en fila, en el orden de los encabezados de la hoja. */
+function objetoAFila_(obj, claves) {
+  return claves.map((clave) => {
+    const v = obj[clave];
+    if (v == null) return '';
+    if (clave === 'ocasiones') return [].concat(v).join(', ');
+    if (clave === 'incluye') return [].concat(v).join('\n');
+    return v;
+  });
+}
+
+/** Claves internas en el orden de las columnas de la hoja (acepta columnas movidas). */
+function clavesDeHoja_(nombre) {
+  const h = hoja_(nombre);
+  const columnas = COLUMNAS[nombre];
+  const encabezados = h.getRange(1, 1, 1, Math.max(h.getLastColumn(), 1)).getValues()[0];
+  return encabezados.map((t) => {
+    const texto = String(t).trim();
+    const col = columnas.find((c) => c[1] === texto || c[0] === texto);
+    return col ? col[0] : '';
+  });
+}
+
+/** Lee una pestaña: [{...objeto, _fila}] */
+function leerTabla_(nombre) {
+  const h = hoja_(nombre);
+  const claves = clavesDeHoja_(nombre);
+  if (h.getLastRow() < 2) return [];
+  return h.getRange(2, 1, h.getLastRow() - 1, claves.length).getValues()
+    .map((fila, i) => Object.assign(filaAObjeto_(fila, claves), { _fila: i + 2 }))
+    .filter((o) => o.id);
+}
+
+function ordenar_(a, b) {
+  const oa = a.orden == null ? Infinity : a.orden;
+  const ob = b.orden == null ? Infinity : b.orden;
+  return oa - ob || a.nombre.localeCompare(b.nombre, 'es');
+}
+
+function sinFila_(o) {
+  const copia = Object.assign({}, o);
+  delete copia._fila;
+  return copia;
+}
+
+function leerTodo_() {
+  return {
+    config: leerConfig_(),
+    productos: leerTabla_(HOJA_PRODUCTOS).sort(ordenar_).map(sinFila_),
+    paquetes: leerTabla_(HOJA_PAQUETES).sort(ordenar_).map(sinFila_),
+  };
+}
+
+/* =====================================================================
+ *  Datos públicos (API del catálogo) con caché
+ * ===================================================================== */
+
+function construirPublico_() {
+  const d = leerTodo_();
+  const visibles = d.productos.filter((p) => p.disponible);
+  const idsVisibles = {};
+  visibles.forEach((p) => { idsVisibles[p.id] = true; });
+  const limpiar = (o) => { const c = Object.assign({}, o); delete c.actualizado; return c; };
+  return {
+    version: 1,
+    actualizado: new Date().toISOString(),
+    config: configPublica_(d.config),
+    productos: visibles.map(limpiar),
+    paquetes: d.paquetes.filter((k) => k.disponible && idsVisibles[k.servicioId]).map(limpiar),
+  };
+}
+
+function jsonPublicoConCache_() {
+  const cache = CacheService.getScriptCache();
+  const partes = Number(cache.get(CLAVE_CACHE + ':n') || 0);
+  if (partes) {
+    const claves = [];
+    for (let i = 0; i < partes; i++) claves.push(CLAVE_CACHE + ':' + i);
+    const valores = cache.getAll(claves);
+    if (claves.every((k) => k in valores)) return claves.map((k) => valores[k]).join('');
+  }
+  const texto = JSON.stringify(construirPublico_());
+  // Cada valor de CacheService admite ~100 KB: se guarda en pedazos.
+  const TAM = 90000;
+  const trozos = {};
+  let n = 0;
+  for (let i = 0; i < texto.length; i += TAM) trozos[CLAVE_CACHE + ':' + n++] = texto.slice(i, i + TAM);
+  trozos[CLAVE_CACHE + ':n'] = String(n);
+  try { cache.putAll(trozos, DURACION_CACHE); } catch (e) { /* si no cabe, se sirve sin caché */ }
+  return texto;
+}
+
+function invalidarCache_() {
+  const claves = [CLAVE_CACHE + ':n'];
+  for (let i = 0; i < 40; i++) claves.push(CLAVE_CACHE + ':' + i);
+  CacheService.getScriptCache().removeAll(claves);
+}
+
+/* =====================================================================
+ *  Escritura
+ * ===================================================================== */
+
+function conBloqueo_(fn) {
+  const candado = LockService.getScriptLock();
+  candado.waitLock(20000);
+  try {
+    const r = fn();
+    SpreadsheetApp.flush();
+    invalidarCache_();
+    return r;
+  } finally {
+    candado.releaseLock();
+  }
+}
+
+function escribirFilas_(nombre, objetos) {
+  if (!objetos.length) return;
+  const h = hoja_(nombre);
+  const claves = clavesDeHoja_(nombre);
+  h.getRange(h.getLastRow() + 1, 1, objetos.length, claves.length)
+    .setValues(objetos.map((o) => objetoAFila_(o, claves)));
+}
+
+function actualizarFila_(nombre, fila, obj) {
+  const claves = clavesDeHoja_(nombre);
+  hoja_(nombre).getRange(fila, 1, 1, claves.length).setValues([objetoAFila_(obj, claves)]);
+}
+
+function escribirOrden_(nombre, lista) {
+  const h = hoja_(nombre);
+  const col = clavesDeHoja_(nombre).indexOf('orden') + 1;
+  lista.forEach((o) => h.getRange(o._fila, col).setValue(o.orden));
+}
+
+function guardarClavesConfig_(valores) {
+  const h = hoja_(HOJA_CONFIG);
+  const filas = h.getLastRow() >= 2 ? h.getRange(2, 1, h.getLastRow() - 1, 1).getValues() : [];
+  Object.keys(valores).forEach((clave) => {
+    const i = filas.findIndex((f) => String(f[0]).trim() === clave);
+    if (i >= 0) {
+      h.getRange(i + 2, 2).setValue(valores[clave]);
+    } else {
+      h.appendRow([clave, valores[clave], '']);
+      filas.push([clave]);
+    }
+  });
+}
+
+function nuevoId_(prefijo, existentes) {
+  let id;
+  do {
+    id = prefijo + Utilities.getUuid().replace(/-/g, '').slice(0, 8);
+  } while (existentes.some((o) => o.id === id));
+  return id;
+}
+
+/**
+ * Mueve un elemento a una posición (0 = primero) dentro de su grupo y renumera 1..n.
+ * Devuelve solo los elementos cuyo orden cambió.
+ */
+function reordenar_(grupo, id, posicion) {
+  const lista = grupo.slice().sort(ordenar_);
+  const desde = lista.findIndex((o) => o.id === id);
+  if (desde < 0) return [];
+  const [item] = lista.splice(desde, 1);
+  const hasta = Math.max(0, Math.min(lista.length, posicion));
+  lista.splice(hasta, 0, item);
+  const cambiados = [];
+  lista.forEach((o, i) => {
+    if (o.orden !== i + 1) { o.orden = i + 1; cambiados.push(o); }
+  });
+  return cambiados;
+}
+
+function esIdDeDrive_(foto) {
+  return /^[\w-]{20,}$/.test(String(foto || ''));
+}
+
+function mandarFotoAPapelera_(foto) {
+  if (!esIdDeDrive_(foto)) return;
+  try { DriveApp.getFileById(foto).setTrashed(true); } catch (e) { /* ya no existe o sin permiso */ }
+}
+
+function fotoEnUso_(foto) {
+  return leerTabla_(HOJA_PRODUCTOS).some((p) => p.foto === foto);
+}
+
+function validarItem_(item, config, esPaquete) {
+  const errores = [];
+  if (!String(item.nombre || '').trim()) errores.push('Escribe el nombre.');
+  if (TIPOS_PRECIO.indexOf(item.tipoPrecio) < 0) errores.push('Elige el tipo de precio.');
+  const precio = aNumero_(item.precio);
+  if (item.tipoPrecio !== 'consultar' && (precio === null || precio < 0)) errores.push('Escribe un precio válido.');
+  if (!esPaquete && !config.categorias.some((c) => c.id === item.categoria)) errores.push('Elige una categoría.');
+  if (errores.length) throw new Error(errores.join(' '));
+}
+
+/* =====================================================================
+ *  Funciones que llama el panel (google.script.run)
+ * ===================================================================== */
+
+/** Todo lo que el panel necesita, incluidos los ocultos. */
+function panelCargar() {
+  verificarAcceso_();
+  const d = leerTodo_();
+  return {
+    config: d.config,
+    productos: d.productos,
+    paquetes: d.paquetes,
+    correo: correoActual_(),
+    urlCatalogo: URL_CATALOGO,
+  };
+}
+
+function panelGuardarProducto(datos) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const config = leerConfig_();
+    const todos = leerTabla_(HOJA_PRODUCTOS);
+    validarItem_(datos, config, false);
+    const ocasionesValidas = config.ocasiones.map((o) => o.id);
+    const producto = {
+      id: datos.id || nuevoId_('p', todos),
+      nombre: String(datos.nombre).trim(),
+      descripcion: String(datos.descripcion || '').trim(),
+      categoria: datos.categoria,
+      ocasiones: [].concat(datos.ocasiones || []).filter((o) => ocasionesValidas.indexOf(o) >= 0),
+      tipoPrecio: datos.tipoPrecio,
+      precio: aNumero_(datos.precio),
+      foto: String(datos.foto || '').trim(),
+      disponible: datos.disponible !== false,
+      destacado: !!datos.destacado,
+      actualizado: new Date().toISOString(),
+    };
+    const anterior = datos.id ? todos.find((p) => p.id === datos.id) : null;
+    if (datos.id && !anterior) throw new Error('Ese producto ya no existe. Recarga el panel.');
+
+    const grupo = todos.filter((p) => p.categoria === producto.categoria && p.id !== producto.id);
+    if (anterior) {
+      producto.orden = anterior.categoria === producto.categoria ? anterior.orden : grupo.length + 1;
+      actualizarFila_(HOJA_PRODUCTOS, anterior._fila, producto);
+      if (anterior.foto && anterior.foto !== producto.foto && !todos.some((p) => p.id !== producto.id && p.foto === anterior.foto)) {
+        mandarFotoAPapelera_(anterior.foto);
+      }
+    } else {
+      producto.orden = grupo.length + 1;
+      escribirFilas_(HOJA_PRODUCTOS, [producto]);
+    }
+
+    const posicion = aNumero_(datos.posicion);
+    if (posicion !== null) {
+      const actualizados = leerTabla_(HOJA_PRODUCTOS).filter((p) => p.categoria === producto.categoria);
+      escribirOrden_(HOJA_PRODUCTOS, reordenar_(actualizados, producto.id, posicion - 1));
+    }
+    return Object.assign(panelCargarSinVerificar_(), { guardadoId: producto.id });
+  });
+}
+
+function panelCambiarProducto(id, campo, valor) {
+  verificarAcceso_();
+  if (['disponible', 'destacado'].indexOf(campo) < 0) throw new Error('Campo no permitido.');
+  return conBloqueo_(() => {
+    const p = leerTabla_(HOJA_PRODUCTOS).find((x) => x.id === id);
+    if (!p) throw new Error('Ese producto ya no existe. Recarga el panel.');
+    p[campo] = !!valor;
+    p.actualizado = new Date().toISOString();
+    actualizarFila_(HOJA_PRODUCTOS, p._fila, p);
+    return panelCargarSinVerificar_();
+  });
+}
+
+function panelMoverProducto(id, direccion) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const todos = leerTabla_(HOJA_PRODUCTOS);
+    const p = todos.find((x) => x.id === id);
+    if (!p) throw new Error('Ese producto ya no existe. Recarga el panel.');
+    const grupo = todos.filter((x) => x.categoria === p.categoria).sort(ordenar_);
+    const actual = grupo.findIndex((x) => x.id === id);
+    escribirOrden_(HOJA_PRODUCTOS, reordenar_(grupo, id, actual + (direccion < 0 ? -1 : 1)));
+    return panelCargarSinVerificar_();
+  });
+}
+
+function panelEliminarProducto(id) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const todos = leerTabla_(HOJA_PRODUCTOS);
+    const p = todos.find((x) => x.id === id);
+    if (!p) return panelCargarSinVerificar_();
+    // Si es un servicio, también se borran sus paquetes (de abajo hacia arriba para no mover filas).
+    leerTabla_(HOJA_PAQUETES).filter((k) => k.servicioId === id)
+      .sort((a, b) => b._fila - a._fila)
+      .forEach((k) => hoja_(HOJA_PAQUETES).deleteRow(k._fila));
+    hoja_(HOJA_PRODUCTOS).deleteRow(p._fila);
+    if (p.foto && !todos.some((x) => x.id !== id && x.foto === p.foto)) mandarFotoAPapelera_(p.foto);
+    return panelCargarSinVerificar_();
+  });
+}
+
+function panelGuardarPaquete(datos) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const config = leerConfig_();
+    validarItem_(datos, config, true);
+    const servicio = leerTabla_(HOJA_PRODUCTOS).find((p) => p.id === datos.servicioId);
+    if (!servicio) throw new Error('Elige el servicio al que pertenece el paquete.');
+    const todos = leerTabla_(HOJA_PAQUETES);
+    const anterior = datos.id ? todos.find((k) => k.id === datos.id) : null;
+    if (datos.id && !anterior) throw new Error('Ese paquete ya no existe. Recarga el panel.');
+    const paquete = {
+      id: datos.id || nuevoId_('k', todos),
+      servicioId: datos.servicioId,
+      nombre: String(datos.nombre).trim(),
+      descripcion: String(datos.descripcion || '').trim(),
+      incluye: lineas_([].concat(datos.incluye || []).join('\n')),
+      tipoPrecio: datos.tipoPrecio,
+      precio: aNumero_(datos.precio),
+      disponible: datos.disponible !== false,
+      actualizado: new Date().toISOString(),
+    };
+    const grupo = todos.filter((k) => k.servicioId === paquete.servicioId && k.id !== paquete.id);
+    if (anterior) {
+      paquete.orden = anterior.servicioId === paquete.servicioId ? anterior.orden : grupo.length + 1;
+      actualizarFila_(HOJA_PAQUETES, anterior._fila, paquete);
+    } else {
+      paquete.orden = grupo.length + 1;
+      escribirFilas_(HOJA_PAQUETES, [paquete]);
+    }
+    return Object.assign(panelCargarSinVerificar_(), { guardadoId: paquete.id });
+  });
+}
+
+function panelCambiarPaquete(id, campo, valor) {
+  verificarAcceso_();
+  if (campo !== 'disponible') throw new Error('Campo no permitido.');
+  return conBloqueo_(() => {
+    const k = leerTabla_(HOJA_PAQUETES).find((x) => x.id === id);
+    if (!k) throw new Error('Ese paquete ya no existe. Recarga el panel.');
+    k.disponible = !!valor;
+    k.actualizado = new Date().toISOString();
+    actualizarFila_(HOJA_PAQUETES, k._fila, k);
+    return panelCargarSinVerificar_();
+  });
+}
+
+function panelMoverPaquete(id, direccion) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const todos = leerTabla_(HOJA_PAQUETES);
+    const k = todos.find((x) => x.id === id);
+    if (!k) throw new Error('Ese paquete ya no existe. Recarga el panel.');
+    const grupo = todos.filter((x) => x.servicioId === k.servicioId).sort(ordenar_);
+    const actual = grupo.findIndex((x) => x.id === id);
+    escribirOrden_(HOJA_PAQUETES, reordenar_(grupo, id, actual + (direccion < 0 ? -1 : 1)));
+    return panelCargarSinVerificar_();
+  });
+}
+
+function panelEliminarPaquete(id) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const k = leerTabla_(HOJA_PAQUETES).find((x) => x.id === id);
+    if (k) hoja_(HOJA_PAQUETES).deleteRow(k._fila);
+    return panelCargarSinVerificar_();
+  });
+}
+
+/** Guarda los ajustes. Las listas llegan como arreglos de objetos. */
+function panelGuardarConfig(datos) {
+  verificarAcceso_();
+  return conBloqueo_(() => {
+    const valores = {};
+    ['negocio', 'lema', 'whatsapp', 'whatsappServicios', 'instagram', 'facebook', 'resenas',
+      'direccion', 'mapsUrl', 'horario', 'temporada', 'temporadaTitulo'].forEach((clave) => {
+      if (clave in datos) valores[clave] = String(datos[clave] == null ? '' : datos[clave]).trim();
+    });
+    ['whatsapp', 'whatsappServicios'].forEach((clave) => {
+      if (!(clave in valores)) return;
+      let d = valores[clave].replace(/\D/g, '');
+      if (d.length === 10) d = '52' + d;
+      if (d && d.length !== 12) throw new Error('El número de WhatsApp debe tener 10 dígitos.');
+      valores[clave] = d;
+    });
+    if ('whatsapp' in valores && !valores.whatsapp) throw new Error('El WhatsApp principal no puede quedar vacío.');
+
+    if (Array.isArray(datos.categorias)) {
+      const cats = datos.categorias
+        .map((c) => ({ id: c.id || crearId_(c.nombre), nombre: String(c.nombre || '').trim(), tipo: c.tipo === 'servicios' ? 'servicios' : 'productos' }))
+        .filter((c) => c.id && c.nombre);
+      if (!cats.length) throw new Error('Debe haber al menos una categoría.');
+      valores.categorias = listaATexto_(cats, ['id', 'nombre', 'tipo']);
+    }
+    if (Array.isArray(datos.ocasiones)) {
+      const ocs = datos.ocasiones
+        .map((o) => ({ id: o.id || crearId_(o.nombre), emoji: String(o.emoji || '').trim(), nombre: String(o.nombre || '').trim() }))
+        .filter((o) => o.id && o.nombre);
+      valores.ocasiones = listaATexto_(ocs, ['id', 'emoji', 'nombre']);
+      if (valores.temporada && !ocs.some((o) => o.id === valores.temporada)) valores.temporada = '';
+    }
+    if (Array.isArray(datos.autorizados)) {
+      const correos = datos.autorizados.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
+      const invalido = correos.find((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+      if (invalido) throw new Error(`"${invalido}" no parece un correo.`);
+      const yo = correoActual_();
+      if (yo && correos.indexOf(yo) < 0) correos.unshift(yo); // nadie se puede dejar fuera a sí mismo
+      valores.autorizados = correos.filter((c, i) => correos.indexOf(c) === i).join('\n');
+    }
+    guardarClavesConfig_(valores);
+    return panelCargarSinVerificar_();
+  });
+}
+
+/**
+ * Recibe una foto ya reducida por el celular (JPEG en base64), la guarda en la carpeta
+ * de fotos y la deja visible para el catálogo. Devuelve el ID del archivo.
+ */
+function panelSubirFoto(base64, tipo, nombre) {
+  verificarAcceso_();
+  if (!/^image\/(jpeg|png|webp)$/.test(tipo)) throw new Error('El archivo no es una imagen compatible.');
+  const bytes = Utilities.base64Decode(base64);
+  if (bytes.length > 3 * 1024 * 1024) throw new Error('La foto es demasiado grande.');
+  const extension = tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : 'jpg';
+  const nombreArchivo = (crearId_(nombre) || 'foto') + '-' + Utilities.formatDate(new Date(), 'America/Mexico_City', 'yyyyMMdd-HHmmss') + '.' + extension;
+  const archivo = carpetaFotos_().createFile(Utilities.newBlob(bytes, tipo, nombreArchivo));
+  archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return archivo.getId();
+}
+
+/** Borra una foto subida que al final no se usó (por ejemplo, si se canceló el formulario). */
+function panelDescartarFoto(id) {
+  verificarAcceso_();
+  if (esIdDeDrive_(id) && !fotoEnUso_(id)) mandarFotoAPapelera_(id);
+  return true;
+}
+
+function panelCargarSinVerificar_() {
+  const d = leerTodo_();
+  return { config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO };
+}
+
+function carpetaFotos_() {
+  const id = leerConfigCruda_().carpetaFotos;
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (e) { /* se creará otra */ }
+  }
+  const carpeta = DriveApp.createFolder(NOMBRE_CARPETA);
+  try { carpeta.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* se comparte cada foto */ }
+  guardarClavesConfig_({ carpetaFotos: carpeta.getId() });
+  return carpeta;
+}
+
+function escaparHtml_(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}

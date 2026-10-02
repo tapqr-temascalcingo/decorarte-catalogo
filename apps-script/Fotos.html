@@ -1,0 +1,75 @@
+<script>
+/* Reducción de fotos en el celular antes de subirlas a Drive.
+   Una foto de 4000×3000 (3–6 MB) queda en ~1200 px y ~150–300 KB: sube rápido aunque la señal sea mala. */
+
+/** Tamaño final manteniendo la proporción; nunca agranda. */
+function calcularTamano(ancho, alto, maximo) {
+  maximo = maximo || 1200;
+  if (!(ancho > 0 && alto > 0)) throw new Error('Imagen sin tamaño');
+  var escala = Math.min(1, maximo / Math.max(ancho, alto));
+  return { ancho: Math.max(1, Math.round(ancho * escala)), alto: Math.max(1, Math.round(alto * escala)) };
+}
+
+function cargarImagen_(archivo) {
+  // createImageBitmap respeta la orientación de la cámara (EXIF) en navegadores actuales.
+  if (window.createImageBitmap) {
+    return createImageBitmap(archivo, { imageOrientation: 'from-image' }).catch(function () {
+      return cargarConElemento_(archivo);
+    });
+  }
+  return cargarConElemento_(archivo);
+}
+
+function cargarConElemento_(archivo) {
+  return new Promise(function (resolver, rechazar) {
+    var url = URL.createObjectURL(archivo);
+    var img = new Image();
+    img.onload = function () { resolver(img); setTimeout(function () { URL.revokeObjectURL(url); }, 1000); };
+    img.onerror = function () { URL.revokeObjectURL(url); rechazar(new Error('No se pudo leer la foto. Prueba con otra.')); };
+    img.src = url;
+  });
+}
+
+function canvasABlob_(canvas, tipo, calidad) {
+  return new Promise(function (resolver, rechazar) {
+    canvas.toBlob(function (b) { b ? resolver(b) : rechazar(new Error('No se pudo convertir la foto.')); }, tipo, calidad);
+  });
+}
+
+function blobABase64_(blob) {
+  return new Promise(function (resolver, rechazar) {
+    var lector = new FileReader();
+    lector.onload = function () { resolver(String(lector.result).split(',')[1]); };
+    lector.onerror = function () { rechazar(new Error('No se pudo leer la foto.')); };
+    lector.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Reduce una foto: JPEG, lado mayor ≤ maximo, peso ≤ maxBytes (bajando calidad si hace falta).
+ * Devuelve { base64, tipo, ancho, alto, bytes, blob }.
+ */
+async function reducirImagen(archivo, opciones) {
+  opciones = Object.assign({ maximo: 1200, calidad: 0.82, maxBytes: 450 * 1024 }, opciones || {});
+  if (!archivo || !/^image\//.test(archivo.type || 'image/')) throw new Error('El archivo no es una foto.');
+  var img = await cargarImagen_(archivo);
+  var tam = calcularTamano(img.width || img.naturalWidth, img.height || img.naturalHeight, opciones.maximo);
+  var canvas = document.createElement('canvas');
+  canvas.width = tam.ancho;
+  canvas.height = tam.alto;
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; // fondo blanco para PNG con transparencia
+  ctx.fillRect(0, 0, tam.ancho, tam.alto);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, tam.ancho, tam.alto);
+  if (img.close) img.close();
+
+  var calidad = opciones.calidad;
+  var blob = await canvasABlob_(canvas, 'image/jpeg', calidad);
+  while (blob.size > opciones.maxBytes && calidad > 0.5) {
+    calidad = Math.round((calidad - 0.08) * 100) / 100;
+    blob = await canvasABlob_(canvas, 'image/jpeg', calidad);
+  }
+  return { base64: await blobABase64_(blob), tipo: 'image/jpeg', ancho: tam.ancho, alto: tam.alto, bytes: blob.size, blob: blob };
+}
+</script>

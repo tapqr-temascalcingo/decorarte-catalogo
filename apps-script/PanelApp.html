@@ -1,0 +1,766 @@
+<script>
+/* Panel de Decorarte: todo pasa por google.script.run hacia Codigo.gs */
+
+var S = {
+  datos: null,          // { config, productos, paquetes, correo, urlCatalogo }
+  vista: 'productos',   // productos | paquetes | ajustes | producto | paquete
+  filtro: 'todos',      // todos | <idCategoria> | ocultos
+  busqueda: '',
+  form: null,           // copia en edición
+  fotoNueva: null,      // { base64, tipo, url } foto reducida pendiente de subir
+  cambios: false,       // hay cambios sin guardar en el formulario
+};
+
+var $ = function (id) { return document.getElementById(id); };
+var vista = $('vista');
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function ico(id) { return '<svg aria-hidden="true"><use href="#i-' + id + '"/></svg>'; }
+function normalizar(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+function crearId(t) { return normalizar(t).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+
+function formatearPrecio(n) {
+  if (n === null || n === undefined || n === '' || isNaN(Number(n))) return '';
+  n = Number(n);
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 });
+}
+function textoPrecio(item) {
+  var p = formatearPrecio(item.precio);
+  if (!p || item.tipoPrecio === 'consultar') return 'Pregunta por precio';
+  return item.tipoPrecio === 'desde' ? 'Desde ' + p : p;
+}
+
+function urlFoto(foto, ancho) {
+  foto = String(foto || '').trim();
+  if (!foto) return '';
+  if (/^(https?:|data:|blob:)/.test(foto)) return foto;
+  if (foto.indexOf('/') >= 0 || /\.(svg|png|jpe?g|webp)$/i.test(foto)) return (S.datos ? S.datos.urlCatalogo : PANEL.urlCatalogo) + foto;
+  return 'https://lh3.googleusercontent.com/d/' + foto + '=w' + (ancho || 300);
+}
+function imgFoto(foto, clase, ancho) {
+  var src = urlFoto(foto, ancho);
+  if (!src) return '<img class="' + clase + ' sin-foto" src="' + esc(PANEL.urlLogo) + '" alt="">';
+  return '<img class="' + clase + '" src="' + esc(src) + '" alt="" loading="lazy">';
+}
+// Si una foto no carga, se ve el logo.
+document.addEventListener('error', function (e) {
+  var img = e.target;
+  if (img.tagName !== 'IMG') return;
+  var drive = /lh3\.googleusercontent\.com\/d\/([\w-]+)=w(\d+)/.exec(img.src);
+  if (drive && !img.dataset.reintento) {
+    img.dataset.reintento = '1';
+    img.src = 'https://drive.google.com/thumbnail?id=' + drive[1] + '&sz=w' + drive[2];
+    return;
+  }
+  if (!img.classList.contains('sin-foto')) { img.classList.add('sin-foto'); img.src = PANEL.urlLogo; }
+}, true);
+
+/* ---------------- Servidor ---------------- */
+
+function llamar(funcion) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (resolver, rechazar) {
+    var r = google.script.run.withSuccessHandler(resolver).withFailureHandler(function (err) {
+      rechazar(new Error(String((err && err.message) || err).replace(/^(Exception|Error):\s*/, '')));
+    });
+    r[funcion].apply(r, args);
+  });
+}
+
+function ocupado(texto) {
+  $('ocupado-texto').textContent = texto || 'Guardando…';
+  $('ocupado').hidden = !texto;
+}
+
+var temporizadorAviso;
+function avisar(texto, tipo) {
+  var a = $('aviso');
+  a.className = 'aviso ' + (tipo || 'exito');
+  a.innerHTML = (tipo === 'error' ? '' : ico('check')) + '<span>' + esc(texto) + '</span>';
+  a.hidden = false;
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(function () { a.hidden = true; }, tipo === 'error' ? 6000 : 2600);
+}
+
+/** Ejecuta una acción del servidor con pantalla de espera y actualiza los datos. */
+async function accion(textoEspera, funcion) {
+  var args = Array.prototype.slice.call(arguments, 2);
+  ocupado(textoEspera);
+  try {
+    var datos = await llamar.apply(null, [funcion].concat(args));
+    S.datos = datos;
+    return datos;
+  } finally {
+    ocupado('');
+  }
+}
+
+function confirmar(titulo, texto, textoSi) {
+  return new Promise(function (resolver) {
+    $('confirmar-titulo').textContent = titulo;
+    $('confirmar-texto').textContent = texto || '';
+    $('confirmar-si').textContent = textoSi || 'Sí, eliminar';
+    $('confirmar').hidden = false;
+    $('confirmar-si').focus();
+    function cerrar(valor) {
+      $('confirmar').hidden = true;
+      $('confirmar-si').onclick = $('confirmar-no').onclick = null;
+      resolver(valor);
+    }
+    $('confirmar-si').onclick = function () { cerrar(true); };
+    $('confirmar-no').onclick = function () { cerrar(false); };
+  });
+}
+
+/* ---------------- Navegación ---------------- */
+
+function categoria(id) { return S.datos.config.categorias.filter(function (c) { return c.id === id; })[0]; }
+function esServicio(p) { var c = categoria(p.categoria); return !!c && c.tipo === 'servicios'; }
+function servicios() { return S.datos.productos.filter(esServicio); }
+
+async function ir(destino) {
+  if (S.cambios && !(await confirmar('¿Salir sin guardar?', 'Los cambios que hiciste se perderán.', 'Sí, salir'))) return;
+  S.cambios = false;
+  S.form = null;
+  S.fotoNueva = null;
+  S.vista = destino;
+  var seccion = destino === 'producto' ? 'productos' : destino === 'paquete' ? 'paquetes' : destino;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ir]'), function (b) {
+    if (b.dataset.ir === seccion) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+  render();
+  window.scrollTo(0, 0);
+}
+
+function render() {
+  if (!S.datos) return;
+  if (S.vista === 'productos') renderProductos();
+  else if (S.vista === 'paquetes') renderPaquetes();
+  else if (S.vista === 'ajustes') renderAjustes();
+  else if (S.vista === 'producto') renderFormProducto();
+  else if (S.vista === 'paquete') renderFormPaquete();
+}
+
+/* ---------------- Productos ---------------- */
+
+function renderProductos() {
+  var d = S.datos;
+  var filtros = [{ id: 'todos', nombre: 'Todos', n: d.productos.length }]
+    .concat(d.config.categorias.map(function (c) {
+      return { id: c.id, nombre: c.nombre, n: d.productos.filter(function (p) { return p.categoria === c.id; }).length };
+    }))
+    .concat([{ id: 'ocultos', nombre: 'Ocultos', n: d.productos.filter(function (p) { return !p.disponible; }).length }]);
+
+  var html = '<h1>Tus productos</h1>' +
+    '<label class="buscador">' + ico('buscar') +
+    '<input id="buscar" type="search" placeholder="Buscar por nombre…" value="' + esc(S.busqueda) + '" autocomplete="off" aria-label="Buscar productos"></label>' +
+    '<div class="filtros">' + filtros.map(function (f) {
+      return '<button type="button" class="filtro" data-filtro="' + esc(f.id) + '" aria-pressed="' + (S.filtro === f.id) + '">' +
+        esc(f.nombre) + ' <span class="num">' + f.n + '</span></button>';
+    }).join('') + '</div><div id="resultados"></div>' +
+    '<button type="button" class="agregar" data-accion="nuevo-producto">' + ico('mas') + 'Agregar</button>';
+  vista.innerHTML = html;
+  renderResultados();
+}
+
+/** Solo la lista: así el buscador no se redibuja mientras se escribe (en el celular se cerraría el teclado). */
+function renderResultados() {
+  var d = S.datos;
+  var q = normalizar(S.busqueda).split(/\s+/).filter(Boolean);
+  var nombreOcasion = {};
+  d.config.ocasiones.forEach(function (o) { nombreOcasion[o.id] = o.nombre; });
+  var lista = d.productos.filter(function (p) {
+    if (S.filtro === 'ocultos' && p.disponible) return false;
+    if (S.filtro !== 'todos' && S.filtro !== 'ocultos' && p.categoria !== S.filtro) return false;
+    if (!q.length) return true;
+    var texto = normalizar([p.nombre, p.descripcion].concat(p.ocasiones.map(function (o) { return nombreOcasion[o]; })).join(' '));
+    return q.every(function (w) { return texto.indexOf(w) >= 0; });
+  });
+
+  var html = '';
+  if (!d.productos.length) {
+    html += '<div class="vacio"><strong>Aún no hay productos</strong>Toca <b>Agregar</b> para subir el primero.</div>';
+  } else if (!lista.length) {
+    html += '<div class="vacio"><strong>No hay resultados</strong>Prueba con otra palabra o filtro.</div>';
+  } else {
+    // Agrupados por categoría porque el orden se maneja dentro de cada una.
+    d.config.categorias.concat([{ id: '', nombre: 'Sin categoría' }]).forEach(function (cat) {
+      var deCat = lista.filter(function (p) { return cat.id ? p.categoria === cat.id : !categoria(p.categoria); });
+      if (!deCat.length) return;
+      var todosCat = d.productos.filter(function (p) { return p.categoria === cat.id; });
+      html += '<h2 class="grupo-titulo">' + esc(cat.nombre) + '<small>' + deCat.length + '</small></h2><div class="lista">' +
+        deCat.map(function (p) { return tarjetaProducto(p, todosCat); }).join('') + '</div>';
+    });
+  }
+  $('resultados').innerHTML = html;
+}
+
+function tarjetaProducto(p, grupo) {
+  var i = grupo.indexOf(p);
+  var precio = textoPrecio(p);
+  var ocasiones = S.datos.config.ocasiones.filter(function (o) { return p.ocasiones.indexOf(o.id) >= 0; });
+  return '<article class="item' + (p.disponible ? '' : ' oculto') + '">' +
+    '<button type="button" class="item-principal" data-accion="editar-producto" data-id="' + esc(p.id) + '" aria-label="Editar ' + esc(p.nombre) + '">' +
+      imgFoto(p.foto, 'item-foto', 200) +
+      '<div class="item-info"><p class="item-nombre">' + esc(p.nombre) + '</p>' +
+      '<div class="item-precio' + (precio === 'Pregunta por precio' ? ' consultar' : '') + '">' + esc(precio) + '</div>' +
+      '<div class="etiquetas">' +
+        (p.disponible ? '' : '<span class="etiqueta oculta">Oculto</span>') +
+        (p.destacado ? '<span class="etiqueta destacada">★ Destacado</span>' : '') +
+        ocasiones.slice(0, 3).map(function (o) { return '<span class="etiqueta">' + esc((o.emoji ? o.emoji + ' ' : '') + o.nombre) + '</span>'; }).join('') +
+        (ocasiones.length > 3 ? '<span class="etiqueta">+' + (ocasiones.length - 3) + '</span>' : '') +
+      '</div></div>' +
+      '<svg class="ico" style="width:24px;height:24px;color:var(--texto-suave)" aria-hidden="true"><use href="#i-lapiz"/></svg>' +
+    '</button>' +
+    '<div class="item-acciones">' +
+      '<button type="button" data-accion="destacar" data-id="' + esc(p.id) + '" class="' + (p.destacado ? 'activo' : '') + '">' +
+        ico(p.destacado ? 'estrella' : 'estrella-vacia') + (p.destacado ? 'Destacado' : 'Destacar') + '</button>' +
+      '<button type="button" data-accion="ocultar" data-id="' + esc(p.id) + '" class="' + (p.disponible ? '' : 'apagado') + '">' +
+        ico(p.disponible ? 'ojo' : 'ojo-no') + (p.disponible ? 'Visible' : 'Oculto') + '</button>' +
+      '<button type="button" data-accion="subir" data-id="' + esc(p.id) + '" aria-label="Subir" ' + (i <= 0 ? 'disabled' : '') + '>' + ico('arriba') + '</button>' +
+      '<button type="button" data-accion="bajar" data-id="' + esc(p.id) + '" aria-label="Bajar" ' + (i >= grupo.length - 1 ? 'disabled' : '') + '>' + ico('abajo') + '</button>' +
+    '</div></article>';
+}
+
+/* ---------------- Formulario de producto ---------------- */
+
+function abrirProducto(id) {
+  var p = S.datos.productos.filter(function (x) { return x.id === id; })[0];
+  var cat = S.filtro !== 'todos' && S.filtro !== 'ocultos' ? S.filtro : (S.datos.config.categorias[0] || {}).id;
+  S.form = p ? JSON.parse(JSON.stringify(p)) : {
+    id: '', nombre: '', descripcion: '', categoria: cat, ocasiones: [], tipoPrecio: 'fijo',
+    precio: null, foto: '', disponible: true, destacado: false,
+  };
+  var grupo = S.datos.productos.filter(function (x) { return x.categoria === S.form.categoria; });
+  S.form.posicion = p ? grupo.indexOf(p) + 1 : grupo.length + 1;
+  S.posicionOriginal = S.form.posicion;
+  S.fotoNueva = null;
+  S.cambios = false;
+  S.vista = 'producto';
+  render();
+  window.scrollTo(0, 0);
+}
+
+function renderFormProducto() {
+  var f = S.form;
+  var c = S.datos.config;
+  var grupo = S.datos.productos.filter(function (x) { return x.categoria === f.categoria && x.id !== f.id; });
+  var totalLugares = grupo.length + 1;
+  var fotoSrc = S.fotoNueva ? S.fotoNueva.url : urlFoto(f.foto, 600);
+
+  vista.innerHTML =
+    '<div class="barra-form"><button type="button" class="atras" data-accion="volver">' + ico('atras') + 'Volver</button></div>' +
+    '<h1>' + (f.id ? 'Editar producto' : 'Nuevo producto') + '</h1>' +
+
+    '<div class="tarjeta-form">' +
+      '<div class="foto-zona">' +
+        (fotoSrc ? '<img src="' + esc(fotoSrc) + '" alt="Foto del producto">' : '<img class="sin-foto" src="' + esc(PANEL.urlLogo) + '" alt="">') +
+        (S.fotoNueva ? '<div class="foto-estado">Foto lista · ' + S.fotoNueva.ancho + '×' + S.fotoNueva.alto + ' · ' + Math.round(S.fotoNueva.bytes / 1024) + ' KB</div>' : '') +
+        (!fotoSrc ? '<div class="foto-estado">Sin foto: en el catálogo se verá el logo</div>' : '') +
+      '</div>' +
+      '<div class="foto-botones">' +
+        '<button type="button" class="boton boton-suave" data-accion="foto-camara">' + ico('camara') + 'Tomar foto</button>' +
+        '<button type="button" class="boton boton-suave" data-accion="foto-galeria">' + ico('galeria') + 'Galería</button>' +
+      '</div>' +
+      (fotoSrc ? '<button type="button" class="foto-quitar" data-accion="foto-quitar">Quitar la foto</button>' : '') +
+    '</div>' +
+
+    '<div class="tarjeta-form">' +
+      '<div class="campo"><label for="f-nombre">Nombre</label>' +
+        '<input class="entrada" id="f-nombre" data-campo="nombre" maxlength="80" value="' + esc(f.nombre) + '" placeholder="Ej. Caja de rosas eternas" autocomplete="off"></div>' +
+      '<div class="campo"><label for="f-descripcion">Descripción corta <span class="nota">(opcional)</span></label>' +
+        '<textarea class="entrada" id="f-descripcion" data-campo="descripcion" maxlength="300" placeholder="¿Qué incluye? ¿Se puede personalizar?">' + esc(f.descripcion) + '</textarea>' +
+        '<div class="contador" id="contador">' + f.descripcion.length + ' / 300</div></div>' +
+      '<div class="campo"><span class="etiqueta-campo">Categoría</span><div class="opciones ' + (c.categorias.length === 2 ? 'dos' : c.categorias.length === 3 ? 'tres' : '') + '">' +
+        c.categorias.map(function (cat) {
+          return '<button type="button" class="opcion" data-categoria="' + esc(cat.id) + '" aria-pressed="' + (f.categoria === cat.id) + '">' + esc(cat.nombre) + '</button>';
+        }).join('') + '</div></div>' +
+      '<div class="campo"><span class="etiqueta-campo">Ocasiones <span class="nota">(elige todas las que apliquen)</span></span><div class="chips">' +
+        c.ocasiones.map(function (o) {
+          return '<button type="button" class="chip-sel" data-ocasion="' + esc(o.id) + '" aria-pressed="' + (f.ocasiones.indexOf(o.id) >= 0) + '">' +
+            ico('check') + esc((o.emoji ? o.emoji + ' ' : '') + o.nombre) + '</button>';
+        }).join('') + '</div></div>' +
+    '</div>' +
+
+    '<div class="tarjeta-form">' +
+      '<div class="campo"><span class="etiqueta-campo">Precio</span><div class="opciones tres">' +
+        [['fijo', 'Precio fijo'], ['desde', 'Desde…'], ['consultar', 'Pregunta por precio']].map(function (t) {
+          return '<button type="button" class="opcion" data-tipo-precio="' + t[0] + '" aria-pressed="' + (f.tipoPrecio === t[0]) + '">' + t[1] + '</button>';
+        }).join('') + '</div></div>' +
+      '<div class="campo" id="campo-precio"' + (f.tipoPrecio === 'consultar' ? ' hidden' : '') + '>' +
+        '<label for="f-precio">' + (f.tipoPrecio === 'desde' ? 'Precio mínimo' : 'Precio') + '</label>' +
+        '<div class="con-prefijo"><span>$</span><input class="entrada" id="f-precio" data-campo="precio" type="text" inputmode="decimal" value="' + (f.precio == null ? '' : esc(f.precio)) + '" placeholder="0"></div>' +
+      '</div>' +
+      '<p class="vista-previa-precio">En el catálogo se verá: <b id="previa-precio">' + esc(textoPrecio(f)) + '</b></p>' +
+    '</div>' +
+
+    '<div class="tarjeta-form">' +
+      interruptor('disponible', 'Visible en el catálogo', 'Si lo apagas, el producto se oculta pero no se borra.', f.disponible) +
+      interruptor('destacado', 'Destacado', 'Aparece con estrella y, si es de la ocasión de temporada, arriba en el catálogo.', f.destacado) +
+      '<div class="campo" style="margin-top:12px"><label for="f-posicion">Lugar en la lista de ' + esc((categoria(f.categoria) || {}).nombre || '') + '</label>' +
+        '<select class="entrada" id="f-posicion" data-campo="posicion">' +
+        Array.from({ length: totalLugares }, function (_, i) {
+          return '<option value="' + (i + 1) + '"' + (f.posicion === i + 1 ? ' selected' : '') + '>' +
+            (i === 0 ? '1 · primero' : i === totalLugares - 1 ? (i + 1) + ' · último' : String(i + 1)) + '</option>';
+        }).join('') + '</select></div>' +
+    '</div>' +
+
+    '<div class="guardar-fijo"><button type="button" class="boton boton-principal" data-accion="guardar-producto">' + ico('check') + 'Guardar</button></div>' +
+    (f.id ? '<div class="zona-peligro"><button type="button" class="boton boton-peligro-borde" data-accion="eliminar-producto">' + ico('basura') + 'Eliminar producto</button></div>' : '');
+}
+
+function interruptor(campo, titulo, texto, valor) {
+  return '<label class="interruptor"><span class="interruptor-texto"><strong>' + esc(titulo) + '</strong><small>' + esc(texto) + '</small></span>' +
+    '<input type="checkbox" data-campo="' + campo + '"' + (valor ? ' checked' : '') + '><span class="palanca"></span></label>';
+}
+
+function leerPrecio(valor) {
+  var limpio = String(valor || '').replace(/[$,\s]/g, '');
+  if (!limpio) return null;
+  var n = Number(limpio);
+  return isFinite(n) ? n : NaN;
+}
+
+async function guardarProducto() {
+  var f = S.form;
+  f.nombre = f.nombre.trim();
+  if (!f.nombre) { avisar('Escribe el nombre del producto.', 'error'); $('f-nombre').classList.add('error'); $('f-nombre').focus(); return; }
+  if (f.tipoPrecio !== 'consultar' && !(f.precio >= 0 && f.precio !== null)) {
+    avisar('Escribe el precio, o elige "Pregunta por precio".', 'error');
+    var campo = $('f-precio'); if (campo) { campo.classList.add('error'); campo.focus(); }
+    return;
+  }
+  var fotoSubida = '';
+  try {
+    if (S.fotoNueva) {
+      ocupado('Subiendo foto…');
+      fotoSubida = await llamar('panelSubirFoto', S.fotoNueva.base64, S.fotoNueva.tipo, f.nombre);
+      f.foto = fotoSubida;
+    }
+    var envio = Object.assign({}, f, { posicion: f.posicion !== S.posicionOriginal ? f.posicion : null });
+    await accion('Guardando…', 'panelGuardarProducto', envio);
+    S.cambios = false;
+    var nuevo = !f.id;
+    await ir('productos');
+    avisar(nuevo ? '¡Producto agregado al catálogo!' : 'Cambios guardados');
+  } catch (err) {
+    ocupado('');
+    if (fotoSubida) llamar('panelDescartarFoto', fotoSubida).catch(function () {});
+    if (fotoSubida) f.foto = '';
+    avisar(err.message, 'error');
+  }
+}
+
+async function eliminarProducto() {
+  var f = S.form;
+  var paquetes = S.datos.paquetes.filter(function (k) { return k.servicioId === f.id; }).length;
+  var ok = await confirmar('¿Eliminar "' + f.nombre + '"?',
+    'Se borrará del catálogo' + (paquetes ? ' junto con sus ' + paquetes + ' paquetes' : '') + '. Si solo quieres quitarlo un tiempo, mejor ocúltalo.');
+  if (!ok) return;
+  try {
+    await accion('Eliminando…', 'panelEliminarProducto', f.id);
+    S.cambios = false;
+    await ir('productos');
+    avisar('Producto eliminado');
+  } catch (err) { avisar(err.message, 'error'); }
+}
+
+/* ---------------- Fotos ---------------- */
+
+async function fotoElegida(archivo) {
+  if (!archivo) return;
+  ocupado('Preparando foto…');
+  try {
+    var r = await reducirImagen(archivo);
+    if (S.fotoNueva && S.fotoNueva.url) URL.revokeObjectURL(S.fotoNueva.url);
+    S.fotoNueva = { base64: r.base64, tipo: r.tipo, ancho: r.ancho, alto: r.alto, bytes: r.bytes, url: URL.createObjectURL(r.blob) };
+    S.cambios = true;
+    render();
+  } catch (err) {
+    avisar(err.message || 'No se pudo usar esa foto.', 'error');
+  } finally {
+    ocupado('');
+  }
+}
+['foto-camara', 'foto-galeria'].forEach(function (id) {
+  $(id).addEventListener('change', function (e) { fotoElegida(e.target.files[0]); e.target.value = ''; });
+});
+
+/* ---------------- Paquetes ---------------- */
+
+function renderPaquetes() {
+  var lista = servicios();
+  var html = '<h1>Paquetes de servicios</h1><p class="ayuda">Cada servicio (charcutería, montaje de mesas, mobiliario…) puede tener varios paquetes con su precio.</p>';
+  if (!lista.length) {
+    html += '<div class="vacio"><strong>Aún no hay servicios</strong>Primero agrega un servicio en <b>Productos</b> con la categoría de servicios. Después aquí le pones sus paquetes.</div>';
+  }
+  lista.forEach(function (s) {
+    var paquetes = S.datos.paquetes.filter(function (k) { return k.servicioId === s.id; });
+    html += '<h2 class="grupo-titulo">' + esc(s.nombre) + '<small>' + paquetes.length + ' paquetes</small></h2><div class="lista">' +
+      paquetes.map(function (k, i) {
+        var precio = textoPrecio(k);
+        return '<article class="item' + (k.disponible ? '' : ' oculto') + '">' +
+          '<button type="button" class="item-principal" data-accion="editar-paquete" data-id="' + esc(k.id) + '" aria-label="Editar ' + esc(k.nombre) + '">' +
+          '<div class="item-info"><p class="item-nombre">' + esc(k.nombre) + '</p>' +
+          '<div class="item-precio' + (precio === 'Pregunta por precio' ? ' consultar' : '') + '">' + esc(precio) + '</div>' +
+          '<div class="etiquetas">' + (k.disponible ? '' : '<span class="etiqueta oculta">Oculto</span>') +
+          (k.incluye.length ? '<span class="etiqueta">' + k.incluye.length + ' cosas incluidas</span>' : '') + '</div></div>' +
+          '<svg class="ico" style="width:24px;height:24px;color:var(--texto-suave)" aria-hidden="true"><use href="#i-lapiz"/></svg></button>' +
+          '<div class="item-acciones" style="grid-template-columns:2fr 56px 56px">' +
+          '<button type="button" data-accion="ocultar-paquete" data-id="' + esc(k.id) + '" class="' + (k.disponible ? '' : 'apagado') + '">' +
+            ico(k.disponible ? 'ojo' : 'ojo-no') + (k.disponible ? 'Visible' : 'Oculto') + '</button>' +
+          '<button type="button" data-accion="subir-paquete" data-id="' + esc(k.id) + '" aria-label="Subir" ' + (i === 0 ? 'disabled' : '') + '>' + ico('arriba') + '</button>' +
+          '<button type="button" data-accion="bajar-paquete" data-id="' + esc(k.id) + '" aria-label="Bajar" ' + (i === paquetes.length - 1 ? 'disabled' : '') + '>' + ico('abajo') + '</button>' +
+          '</div></article>';
+      }).join('') +
+      '<button type="button" class="agregar-fila" data-accion="nuevo-paquete" data-servicio="' + esc(s.id) + '">+ Agregar paquete a ' + esc(s.nombre) + '</button></div>';
+  });
+  vista.innerHTML = html;
+}
+
+function abrirPaquete(id, servicioId) {
+  var k = S.datos.paquetes.filter(function (x) { return x.id === id; })[0];
+  S.form = k ? JSON.parse(JSON.stringify(k)) : {
+    id: '', servicioId: servicioId || (servicios()[0] || {}).id || '', nombre: '', descripcion: '', incluye: [],
+    tipoPrecio: 'fijo', precio: null, disponible: true,
+  };
+  S.cambios = false;
+  S.vista = 'paquete';
+  render();
+  window.scrollTo(0, 0);
+}
+
+function renderFormPaquete() {
+  var f = S.form;
+  vista.innerHTML =
+    '<div class="barra-form"><button type="button" class="atras" data-accion="volver">' + ico('atras') + 'Volver</button></div>' +
+    '<h1>' + (f.id ? 'Editar paquete' : 'Nuevo paquete') + '</h1>' +
+    '<div class="tarjeta-form">' +
+      '<div class="campo"><label for="f-servicio">Servicio</label><select class="entrada" id="f-servicio" data-campo="servicioId">' +
+        servicios().map(function (s) { return '<option value="' + esc(s.id) + '"' + (s.id === f.servicioId ? ' selected' : '') + '>' + esc(s.nombre) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="campo"><label for="f-nombre">Nombre del paquete</label>' +
+        '<input class="entrada" id="f-nombre" data-campo="nombre" maxlength="60" value="' + esc(f.nombre) + '" placeholder="Ej. Fiesta (25 personas)" autocomplete="off"></div>' +
+      '<div class="campo"><label for="f-descripcion">Descripción <span class="nota">(opcional)</span></label>' +
+        '<input class="entrada" id="f-descripcion" data-campo="descripcion" maxlength="140" value="' + esc(f.descripcion) + '" placeholder="Ej. Ideal para cumpleaños"></div>' +
+      '<div class="campo"><label for="f-incluye">¿Qué incluye? <span class="nota">(una cosa por renglón)</span></label>' +
+        '<textarea class="entrada" id="f-incluye" data-campo="incluye" placeholder="Hasta 25 personas&#10;Mesa decorada&#10;Fruta de temporada">' + esc(f.incluye.join('\n')) + '</textarea></div>' +
+    '</div>' +
+    '<div class="tarjeta-form">' +
+      '<div class="campo"><span class="etiqueta-campo">Precio</span><div class="opciones tres">' +
+        [['fijo', 'Precio fijo'], ['desde', 'Desde…'], ['consultar', 'Pregunta por precio']].map(function (t) {
+          return '<button type="button" class="opcion" data-tipo-precio="' + t[0] + '" aria-pressed="' + (f.tipoPrecio === t[0]) + '">' + t[1] + '</button>';
+        }).join('') + '</div></div>' +
+      '<div class="campo" id="campo-precio"' + (f.tipoPrecio === 'consultar' ? ' hidden' : '') + '>' +
+        '<label for="f-precio">' + (f.tipoPrecio === 'desde' ? 'Precio mínimo' : 'Precio') + '</label>' +
+        '<div class="con-prefijo"><span>$</span><input class="entrada" id="f-precio" data-campo="precio" type="text" inputmode="decimal" value="' + (f.precio == null ? '' : esc(f.precio)) + '" placeholder="0"></div>' +
+      '</div>' +
+      '<p class="vista-previa-precio">En el catálogo se verá: <b id="previa-precio">' + esc(textoPrecio(f)) + '</b></p>' +
+      interruptor('disponible', 'Visible en el catálogo', 'Si lo apagas, el paquete se oculta pero no se borra.', f.disponible) +
+    '</div>' +
+    '<div class="guardar-fijo"><button type="button" class="boton boton-principal" data-accion="guardar-paquete">' + ico('check') + 'Guardar</button></div>' +
+    (f.id ? '<div class="zona-peligro"><button type="button" class="boton boton-peligro-borde" data-accion="eliminar-paquete">' + ico('basura') + 'Eliminar paquete</button></div>' : '');
+}
+
+async function guardarPaquete() {
+  var f = S.form;
+  f.nombre = f.nombre.trim();
+  if (!f.nombre) { avisar('Escribe el nombre del paquete.', 'error'); $('f-nombre').focus(); return; }
+  if (f.tipoPrecio !== 'consultar' && !(f.precio >= 0 && f.precio !== null)) { avisar('Escribe el precio, o elige "Pregunta por precio".', 'error'); return; }
+  try {
+    var nuevo = !f.id;
+    await accion('Guardando…', 'panelGuardarPaquete', f);
+    S.cambios = false;
+    await ir('paquetes');
+    avisar(nuevo ? '¡Paquete agregado!' : 'Cambios guardados');
+  } catch (err) { avisar(err.message, 'error'); }
+}
+
+async function eliminarPaquete() {
+  if (!(await confirmar('¿Eliminar el paquete "' + S.form.nombre + '"?', 'Si solo quieres quitarlo un tiempo, mejor ocúltalo.'))) return;
+  try {
+    await accion('Eliminando…', 'panelEliminarPaquete', S.form.id);
+    S.cambios = false;
+    await ir('paquetes');
+    avisar('Paquete eliminado');
+  } catch (err) { avisar(err.message, 'error'); }
+}
+
+/* ---------------- Ajustes ---------------- */
+
+function telefonoBonito(n) {
+  var d = String(n || '').replace(/\D/g, '');
+  if (d.length === 12 && d.indexOf('52') === 0) d = d.slice(2);
+  return d.length === 10 ? d.slice(0, 3) + ' ' + d.slice(3, 6) + ' ' + d.slice(6) : d;
+}
+
+function renderAjustes() {
+  var c = S.datos.config;
+  if (!S.ajustes) {
+    S.ajustes = {
+      ocasiones: c.ocasiones.map(function (o) { return Object.assign({}, o); }),
+      categorias: c.categorias.map(function (o) { return Object.assign({}, o); }),
+      autorizados: c.autorizados.slice(),
+    };
+  }
+  var A = S.ajustes;
+  function texto(id, etiqueta, valor, extra) {
+    return '<div class="campo"><label for="a-' + id + '">' + etiqueta + '</label><input class="entrada" id="a-' + id + '" data-ajuste="' + id + '" value="' + esc(valor) + '" ' + (extra || '') + '></div>';
+  }
+  vista.innerHTML = '<h1>Ajustes</h1>' +
+
+    '<h2>Contacto y redes</h2><div class="tarjeta-form">' +
+      texto('whatsapp', 'WhatsApp para pedidos', telefonoBonito(c.whatsapp), 'type="tel" inputmode="tel" placeholder="712 231 9080"') +
+      texto('whatsappServicios', 'WhatsApp para cotizar servicios <span class="nota">(opcional; si lo dejas vacío se usa el de pedidos)</span>', telefonoBonito(c.whatsappServicios), 'type="tel" inputmode="tel" placeholder="Mismo número"') +
+      texto('instagram', 'Instagram (enlace)', c.instagram, 'type="url" inputmode="url"') +
+      texto('facebook', 'Facebook (enlace)', c.facebook, 'type="url" inputmode="url"') +
+      texto('resenas', 'Enlace para reseñas de Google', c.resenas, 'type="url" inputmode="url"') +
+      texto('direccion', 'Dirección', c.direccion, 'placeholder="Calle, número, colonia, Temascalcingo"') +
+      texto('mapsUrl', 'Enlace de Google Maps <span class="nota">(opcional)</span>', c.mapsUrl, 'type="url" inputmode="url" placeholder="https://maps.app.goo.gl/…"') +
+      texto('horario', 'Horario <span class="nota">(opcional)</span>', c.horario, 'placeholder="Lunes a sábado de 10:00 a 20:00"') +
+      texto('lema', 'Frase bajo el logo', c.lema) +
+      '<button type="button" class="boton boton-principal" data-accion="guardar-contacto">' + ico('check') + 'Guardar contacto</button>' +
+    '</div>' +
+
+    '<h2>Temporada destacada</h2><div class="tarjeta-form">' +
+      '<p class="ayuda" style="margin-top:0">Los productos <b>destacados</b> de esta ocasión salen hasta arriba del catálogo.</p>' +
+      '<div class="campo"><label for="a-temporada">Ocasión de temporada</label><select class="entrada" id="a-temporada" data-ajuste="temporada">' +
+        '<option value="">Ninguna (no mostrar sección)</option>' +
+        c.ocasiones.map(function (o) { return '<option value="' + esc(o.id) + '"' + (o.id === c.temporada ? ' selected' : '') + '>' + esc((o.emoji ? o.emoji + ' ' : '') + o.nombre) + '</option>'; }).join('') +
+      '</select></div>' +
+      texto('temporadaTitulo', 'Título de la sección <span class="nota">(opcional)</span>', c.temporadaTitulo, 'placeholder="Ej. Especial 10 de mayo"') +
+      '<button type="button" class="boton boton-principal" data-accion="guardar-temporada">' + ico('check') + 'Guardar temporada</button>' +
+    '</div>' +
+
+    '<h2>Ocasiones</h2><div class="tarjeta-form">' +
+      '<p class="ayuda" style="margin-top:0">Son los botones para filtrar el catálogo. El emoji es opcional.</p>' +
+      A.ocasiones.map(function (o, i) {
+        return '<div class="fila-editable">' +
+          '<input class="entrada emoji" data-lista="ocasiones" data-i="' + i + '" data-prop="emoji" value="' + esc(o.emoji) + '" aria-label="Emoji" maxlength="4">' +
+          '<input class="entrada" data-lista="ocasiones" data-i="' + i + '" data-prop="nombre" value="' + esc(o.nombre) + '" aria-label="Nombre de la ocasión" placeholder="Nombre">' +
+          '<button type="button" class="boton-icono" data-accion="mover-fila" data-lista="ocasiones" data-i="' + i + '" aria-label="Subir"' + (i === 0 ? ' disabled' : '') + '>' + ico('arriba') + '</button>' +
+          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="ocasiones" data-i="' + i + '" aria-label="Quitar">' + ico('basura') + '</button></div>';
+      }).join('') +
+      '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="ocasiones">+ Agregar ocasión</button>' +
+      '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar ocasiones</button>' +
+    '</div>' +
+
+    '<h2>Categorías</h2><div class="tarjeta-form">' +
+      '<p class="ayuda" style="margin-top:0">Son las pestañas de arriba del catálogo. En las de tipo <b>Servicios</b> se muestran los paquetes y el botón "Cotizar".</p>' +
+      A.categorias.map(function (o, i) {
+        return '<div class="fila-editable">' +
+          '<input class="entrada" data-lista="categorias" data-i="' + i + '" data-prop="nombre" value="' + esc(o.nombre) + '" aria-label="Nombre de la categoría" placeholder="Nombre">' +
+          '<select class="entrada" data-lista="categorias" data-i="' + i + '" data-prop="tipo" aria-label="Tipo">' +
+            '<option value="productos"' + (o.tipo !== 'servicios' ? ' selected' : '') + '>Productos</option>' +
+            '<option value="servicios"' + (o.tipo === 'servicios' ? ' selected' : '') + '>Servicios</option></select>' +
+          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="categorias" data-i="' + i + '" aria-label="Quitar">' + ico('basura') + '</button></div>';
+      }).join('') +
+      '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="categorias">+ Agregar categoría</button>' +
+      '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar categorías</button>' +
+    '</div>' +
+
+    '<h2>Personas con acceso al panel</h2><div class="tarjeta-form">' +
+      '<p class="ayuda" style="margin-top:0">Correos de Gmail que pueden entrar aquí. Tu correo siempre se queda.</p>' +
+      A.autorizados.map(function (correo, i) {
+        return '<div class="fila-editable"><input class="entrada" type="email" inputmode="email" data-lista="autorizados" data-i="' + i + '" value="' + esc(correo) + '" aria-label="Correo" placeholder="correo@gmail.com">' +
+          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="autorizados" data-i="' + i + '" aria-label="Quitar"' + (correo === S.datos.correo ? ' disabled' : '') + '>' + ico('basura') + '</button></div>';
+      }).join('') +
+      '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="autorizados">+ Agregar persona</button>' +
+      '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar personas</button>' +
+    '</div>' +
+
+    '<h2>Tener el panel en tu celular</h2><div class="tarjeta-form">' +
+      '<ol class="pasos"><li>Abre <a href="' + esc(S.datos.urlCatalogo) + 'panel/" target="_blank" rel="noopener"><b>este enlace</b></a> en Chrome (Android) o Safari (iPhone).</li>' +
+      '<li>Android: menú <b>⋮</b> → <b>Agregar a la pantalla principal</b>. iPhone: botón <b>Compartir</b> → <b>Agregar a inicio</b>.</li>' +
+      '<li>Te queda un ícono con tu logo que abre este panel.</li></ol>' +
+    '</div>';
+}
+
+function leerAjustesContacto() {
+  var r = {};
+  Array.prototype.forEach.call(vista.querySelectorAll('[data-ajuste]'), function (el) { r[el.dataset.ajuste] = el.value.trim(); });
+  return r;
+}
+
+async function guardarAjustes(datos, mensaje) {
+  try {
+    await accion('Guardando…', 'panelGuardarConfig', datos);
+    S.ajustes = null;
+    render();
+    avisar(mensaje || 'Ajustes guardados');
+  } catch (err) { avisar(err.message, 'error'); }
+}
+
+/* ---------------- Eventos ---------------- */
+
+document.addEventListener('click', async function (e) {
+  var nav = e.target.closest('[data-ir]');
+  if (nav) { S.ajustes = null; return ir(nav.dataset.ir); }
+
+  var filtro = e.target.closest('[data-filtro]');
+  if (filtro) { S.filtro = filtro.dataset.filtro; return render(); }
+
+  if (S.form) {
+    var cat = e.target.closest('[data-categoria]');
+    if (cat) {
+      S.form.categoria = cat.dataset.categoria;
+      S.form.posicion = S.datos.productos.filter(function (x) { return x.categoria === S.form.categoria && x.id !== S.form.id; }).length + 1;
+      S.posicionOriginal = -1;
+      S.cambios = true;
+      return render();
+    }
+    var oc = e.target.closest('[data-ocasion]');
+    if (oc) {
+      var lista = S.form.ocasiones, id = oc.dataset.ocasion, i = lista.indexOf(id);
+      if (i >= 0) lista.splice(i, 1); else lista.push(id);
+      oc.setAttribute('aria-pressed', String(i < 0));
+      S.cambios = true;
+      return;
+    }
+    var tp = e.target.closest('[data-tipo-precio]');
+    if (tp) {
+      S.form.tipoPrecio = tp.dataset.tipoPrecio;
+      S.cambios = true;
+      render();
+      if (S.form.tipoPrecio !== 'consultar' && S.form.precio == null) $('f-precio').focus();
+      return;
+    }
+  }
+
+  var b = e.target.closest('[data-accion]');
+  if (!b || b.disabled) return;
+  var id = b.dataset.id;
+  var p = id && S.datos.productos.filter(function (x) { return x.id === id; })[0];
+  var k = id && S.datos.paquetes.filter(function (x) { return x.id === id; })[0];
+  try {
+    switch (b.dataset.accion) {
+      case 'nuevo-producto': return abrirProducto(null);
+      case 'editar-producto': return abrirProducto(id);
+      case 'volver': return ir(S.vista === 'paquete' ? 'paquetes' : 'productos');
+      case 'guardar-producto': return guardarProducto();
+      case 'eliminar-producto': return eliminarProducto();
+      case 'foto-camara': return $('foto-camara').click();
+      case 'foto-galeria': return $('foto-galeria').click();
+      case 'foto-quitar':
+        S.fotoNueva = null; S.form.foto = ''; S.cambios = true; return render();
+      case 'destacar':
+        await accion(p.destacado ? 'Quitando estrella…' : 'Destacando…', 'panelCambiarProducto', id, 'destacado', !p.destacado);
+        render(); return avisar(p.destacado ? 'Ya no está destacado' : '★ Destacado');
+      case 'ocultar':
+        await accion(p.disponible ? 'Ocultando…' : 'Mostrando…', 'panelCambiarProducto', id, 'disponible', !p.disponible);
+        render(); return avisar(p.disponible ? 'Oculto: ya no se ve en el catálogo' : 'Visible en el catálogo');
+      case 'subir': case 'bajar':
+        await accion('Moviendo…', 'panelMoverProducto', id, b.dataset.accion === 'subir' ? -1 : 1);
+        return render();
+      case 'nuevo-paquete': return abrirPaquete(null, b.dataset.servicio);
+      case 'editar-paquete': return abrirPaquete(id);
+      case 'guardar-paquete': return guardarPaquete();
+      case 'eliminar-paquete': return eliminarPaquete();
+      case 'ocultar-paquete':
+        await accion(k.disponible ? 'Ocultando…' : 'Mostrando…', 'panelCambiarPaquete', id, 'disponible', !k.disponible);
+        render(); return avisar(k.disponible ? 'Paquete oculto' : 'Paquete visible');
+      case 'subir-paquete': case 'bajar-paquete':
+        await accion('Moviendo…', 'panelMoverPaquete', id, b.dataset.accion === 'subir-paquete' ? -1 : 1);
+        return render();
+      case 'guardar-contacto': {
+        var c = leerAjustesContacto();
+        return guardarAjustes({
+          whatsapp: c.whatsapp, whatsappServicios: c.whatsappServicios, instagram: c.instagram, facebook: c.facebook,
+          resenas: c.resenas, direccion: c.direccion, mapsUrl: c.mapsUrl, horario: c.horario, lema: c.lema,
+        }, 'Contacto guardado');
+      }
+      case 'guardar-temporada': {
+        var t = leerAjustesContacto();
+        return guardarAjustes({ temporada: t.temporada, temporadaTitulo: t.temporadaTitulo }, 'Temporada guardada');
+      }
+      case 'agregar-fila': {
+        var nombre = b.dataset.lista;
+        S.ajustes[nombre].push(nombre === 'autorizados' ? '' : nombre === 'categorias' ? { id: '', nombre: '', tipo: 'productos' } : { id: '', emoji: '', nombre: '' });
+        render();
+        var campos = vista.querySelectorAll('[data-lista="' + nombre + '"][data-i="' + (S.ajustes[nombre].length - 1) + '"]');
+        var ultimo = Array.prototype.filter.call(campos, function (el) { return el.tagName === 'INPUT' && el.dataset.prop !== 'emoji'; })[0];
+        if (ultimo) ultimo.focus();
+        return;
+      }
+      case 'quitar-fila': {
+        var l = S.ajustes[b.dataset.lista], idx = Number(b.dataset.i);
+        if (b.dataset.lista === 'categorias') {
+          var usados = S.datos.productos.filter(function (x) { return x.categoria === l[idx].id; }).length;
+          if (usados && !(await confirmar('¿Quitar la categoría "' + l[idx].nombre + '"?', 'Tiene ' + usados + ' productos; dejarán de verse en el catálogo hasta que les pongas otra categoría.', 'Sí, quitar'))) return;
+        }
+        l.splice(idx, 1);
+        return render();
+      }
+      case 'mover-fila': {
+        var lm = S.ajustes[b.dataset.lista], im = Number(b.dataset.i);
+        lm.splice(im - 1, 0, lm.splice(im, 1)[0]);
+        return render();
+      }
+      case 'guardar-listas': {
+        var A = S.ajustes;
+        var nombres = A.categorias.map(function (x) { return x.nombre.trim(); });
+        if (nombres.some(function (n) { return !n; })) { avisar('Escribe el nombre de cada categoría o quita las vacías.', 'error'); return; }
+        return guardarAjustes({
+          ocasiones: A.ocasiones.filter(function (o) { return o.nombre.trim(); }).map(function (o) { return { id: o.id || crearId(o.nombre), emoji: o.emoji, nombre: o.nombre.trim() }; }),
+          categorias: A.categorias.map(function (o) { return { id: o.id || crearId(o.nombre), nombre: o.nombre.trim(), tipo: o.tipo }; }),
+          autorizados: A.autorizados.filter(function (x) { return x.trim(); }),
+        }, 'Listo, guardado');
+      }
+    }
+  } catch (err) {
+    avisar(err.message, 'error');
+  }
+});
+
+document.addEventListener('input', function (e) {
+  var el = e.target;
+  if (el.id === 'buscar') { S.busqueda = el.value; renderResultados(); return; }
+  if (el.dataset.lista && S.ajustes) {
+    var lista = S.ajustes[el.dataset.lista];
+    if (el.dataset.prop) lista[Number(el.dataset.i)][el.dataset.prop] = el.value; else lista[Number(el.dataset.i)] = el.value;
+    return;
+  }
+  if (!S.form || !el.dataset.campo) return;
+  var campo = el.dataset.campo;
+  el.classList.remove('error');
+  S.cambios = true;
+  if (campo === 'precio') {
+    S.form.precio = leerPrecio(el.value);
+    $('previa-precio').textContent = isNaN(S.form.precio) ? '—' : textoPrecio(S.form);
+  } else if (campo === 'incluye') {
+    S.form.incluye = el.value.split('\n');
+  } else if (el.type === 'checkbox') {
+    S.form[campo] = el.checked;
+  } else if (campo === 'posicion') {
+    S.form.posicion = Number(el.value);
+  } else {
+    S.form[campo] = el.value;
+    if (campo === 'descripcion') $('contador').textContent = el.value.length + ' / 300';
+  }
+});
+document.addEventListener('change', function (e) {
+  var el = e.target;
+  if (el.dataset.lista && S.ajustes && el.tagName === 'SELECT') S.ajustes[el.dataset.lista][Number(el.dataset.i)][el.dataset.prop] = el.value;
+  if (S.form && el.dataset.campo === 'posicion') { S.form.posicion = Number(el.value); S.cambios = true; }
+  if (S.form && el.dataset.campo === 'servicioId') { S.form.servicioId = el.value; S.cambios = true; }
+  if (S.form && el.type === 'checkbox' && el.dataset.campo) { S.form[el.dataset.campo] = el.checked; S.cambios = true; }
+});
+
+window.addEventListener('beforeunload', function (e) { if (S.cambios) { e.preventDefault(); e.returnValue = ''; } });
+
+/* ---------------- Inicio ---------------- */
+
+(async function iniciar() {
+  try {
+    S.datos = await llamar('panelCargar');
+    render();
+  } catch (err) {
+    vista.innerHTML = '<div class="vacio"><strong>No se pudo cargar el panel</strong>' + esc(err.message) +
+      '<div style="height:14px"></div><button type="button" class="boton boton-principal" onclick="location.reload()">Intentar de nuevo</button></div>';
+  }
+})();
+</script>
