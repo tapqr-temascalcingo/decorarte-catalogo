@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+<defs>
+<radialGradient id="bg" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#fff8fa"/><stop offset="1" stop-color="#f9dbe6"/></radialGradient>
+<linearGradient id="oro" x1="0" x2="1"><stop offset="0" stop-color="#e9cf9a"/><stop offset=".5" stop-color="#d4af37"/><stop offset="1" stop-color="#e9cf9a"/></linearGradient>
+<linearGradient id="rosa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6c2d6"/><stop offset="1" stop-color="#ec9fc0"/></linearGradient>
+<linearGradient id="rosaF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f079a8"/><stop offset="1" stop-color="#d9558d"/></linearGradient>
+<symbol id="rosaFlor" viewBox="-40 -40 80 80"><circle r="36" fill="#e2578a"/><circle r="27" fill="#ec6e9a"/><path d="M-18 4a18 18 0 0 1 30-14M14 -6a14 14 0 0 1-22 16M-8 8a9 9 0 0 1 12-10" fill="none" stroke="#b83a68" stroke-width="4" stroke-linecap="round"/></symbol>
+<symbol id="hoja" viewBox="-30 -15 60 30"><path d="M-28 0Q0-18 28 0Q0 18-28 0Z" fill="#8fbf9a"/><path d="M-24 0H24" stroke="#6fa07c" stroke-width="2"/></symbol>
+</defs>
+<rect width="600" height="600" fill="url(#bg)"/>
+<circle cx="90" cy="110" r="70" fill="#f6c9d8" opacity=".35"/><circle cx="530" cy="500" r="90" fill="#e9cf9a" opacity=".25"/>
+<g fill="#d4af37" opacity=".55"><circle cx="70" cy="300" r="5"/><circle cx="520" cy="120" r="6"/><circle cx="460" cy="70" r="4"/><circle cx="120" cy="520" r="5"/><circle cx="545" cy="300" r="4"/></g>
+<g fill="#f0aecb" opacity=".8"><circle cx="160" cy="70" r="5"/><circle cx="420" cy="540" r="6"/><circle cx="40" cy="430" r="4"/><circle cx="560" cy="200" r="5"/></g>
+<ellipse cx="300" cy="520" rx="200" ry="22" fill="#d996ae" opacity=".22"/>
+
+<rect x="140" y="370" width="320" height="110" rx="20" fill="#fff" stroke="#f3dbe3" stroke-width="4"/>
+<rect x="185" y="270" width="230" height="105" rx="20" fill="#fff" stroke="#f3dbe3" stroke-width="4"/>
+<rect x="230" y="180" width="140" height="95" rx="18" fill="#fff" stroke="#f3dbe3" stroke-width="4"/>
+<g stroke="#f6e8ed" stroke-width="3"><path d="M180 380v90M220 380v90M260 380v90M340 380v90M380 380v90M420 380v90M225 280v85M265 280v85M335 280v85M375 280v85"/></g>
+<rect x="140" y="410" width="320" height="26" fill="url(#rosa)"/><rect x="185" y="310" width="230" height="24" fill="#bfe0f0"/><rect x="230" y="218" width="140" height="22" fill="url(#rosa)"/>
+<path d="M300 180l-50-34q-10 26 10 42zM300 180l50-34q10 26-10 42z" fill="url(#rosaF)"/><circle cx="300" cy="178" r="14" fill="#d9558d"/>
+<path d="M120 490q-6-44 18-54h22q10 4 6 22l-4 32z" fill="#bfe0f0"/>
+<path d="M440 490q-4-36 6-54h22q16 6 12 28l-4 26z" fill="url(#rosa)"/>
+<circle cx="300" cy="352" r="22" fill="#fff" stroke="#e9cf9a" stroke-width="6"/><circle cx="300" cy="352" r="8" fill="#e9cf9a"/>
+
+</svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+<defs>
+<radialGradient id="bg" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#fff8fa"/><stop offset="1" stop-color="#f9dbe6"/></radialGradient>
+<linearGradient id="oro" x1="0" x2="1"><stop offset="0" stop-color="#e9cf9a"/><stop offset=".5" stop-color="#d4af37"/><stop offset="1" stop-color="#e9cf9a"/></linearGradient>
+<linearGradient id="rosa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6c2d6"/><stop offset="1" stop-color="#ec9fc0"/></linearGradient>
+<linearGradient id="rosaF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f079a8"/><stop offset="1" stop-color="#d9558d"/></linearGradient>
+<symbol id="rosaFlor" viewBox="-40 -40 80 80"><circle r="36" fill="#e2578a"/><circle r="27" fill="#ec6e9a"/><path d="M-18 4a18 18 0 0 1 30-14M14 -6a14 14 0 0 1-22 16M-8 8a9 9 0 0 1 12-10" fill="none" stroke="#b83a68" stroke-width="4" stroke-linecap="round"/></symbol>
+<symbol id="hoja" viewBox="-30 -15 60 30"><path d="M-28 0Q0-18 28 0Q0 18-28 0Z" fill="#8fbf9a"/><path d="M-24 0H24" stroke="#6fa07c" stroke-width="2"/></symbol>
+</defs>
+<rect width="600" height="600" fill="url(#bg)"/>
+<circle cx="90" cy="110" r="70" fill="#f6c9d8" opacity=".35"/><circle cx="530" cy="500" r="90" fill="#e9cf9a" opacity=".25"/>
+<g fill="#d4af37" opacity=".55"><circle cx="70" cy="300" r="5"/><circle cx="520" cy="120" r="6"/><circle cx="460" cy="70" r="4"/><circle cx="120" cy="520" r="5"/><circle cx="545" cy="300" r="4"/></g>
+<g fill="#f0aecb" opacity=".8"><circle cx="160" cy="70" r="5"/><circle cx="420" cy="540" r="6"/><circle cx="40" cy="430" r="4"/><circle cx="560" cy="200" r="5"/></g>
+<ellipse cx="300" cy="520" rx="200" ry="22" fill="#d996ae" opacity=".22"/>
+
+<rect x="150" y="320" width="300" height="170" rx="16" fill="url(#rosaF)"/><rect x="135" y="300" width="330" height="44" rx="12" fill="#f079a8"/>
+<rect x="282" y="300" width="36" height="190" fill="url(#oro)"/>
+<path d="M300 300q-60-50-80-20 10 30 80 20zM300 300q60-50 80-20-10 30-80 20z" fill="url(#oro)"/>
+<path d="M210 195v50q90 44 180 0v-50l-90 32z" fill="#4a3a40"/>
+<path d="M300 110l170 62-170 62-170-62z" fill="#3b3340"/>
+<path d="M300 172l120 20v80" stroke="#d4af37" stroke-width="6" fill="none"/><path d="M412 270h16l6 46h-28z" fill="#d4af37"/>
+<circle cx="300" cy="172" r="9" fill="#d4af37"/>
+<g transform="rotate(-18 470 430)"><rect x="400" y="410" width="150" height="40" rx="20" fill="#fff8f0" stroke="#e9d6c0" stroke-width="4"/><rect x="465" y="406" width="20" height="48" fill="#c8457f"/></g>
+
+</svg>

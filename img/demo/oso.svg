@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+<defs>
+<radialGradient id="bg" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#fff8fa"/><stop offset="1" stop-color="#f9dbe6"/></radialGradient>
+<linearGradient id="oro" x1="0" x2="1"><stop offset="0" stop-color="#e9cf9a"/><stop offset=".5" stop-color="#d4af37"/><stop offset="1" stop-color="#e9cf9a"/></linearGradient>
+<linearGradient id="rosa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6c2d6"/><stop offset="1" stop-color="#ec9fc0"/></linearGradient>
+<linearGradient id="rosaF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f079a8"/><stop offset="1" stop-color="#d9558d"/></linearGradient>
+<symbol id="rosaFlor" viewBox="-40 -40 80 80"><circle r="36" fill="#e2578a"/><circle r="27" fill="#ec6e9a"/><path d="M-18 4a18 18 0 0 1 30-14M14 -6a14 14 0 0 1-22 16M-8 8a9 9 0 0 1 12-10" fill="none" stroke="#b83a68" stroke-width="4" stroke-linecap="round"/></symbol>
+<symbol id="hoja" viewBox="-30 -15 60 30"><path d="M-28 0Q0-18 28 0Q0 18-28 0Z" fill="#8fbf9a"/><path d="M-24 0H24" stroke="#6fa07c" stroke-width="2"/></symbol>
+</defs>
+<rect width="600" height="600" fill="url(#bg)"/>
+<circle cx="90" cy="110" r="70" fill="#f6c9d8" opacity=".35"/><circle cx="530" cy="500" r="90" fill="#e9cf9a" opacity=".25"/>
+<g fill="#d4af37" opacity=".55"><circle cx="70" cy="300" r="5"/><circle cx="520" cy="120" r="6"/><circle cx="460" cy="70" r="4"/><circle cx="120" cy="520" r="5"/><circle cx="545" cy="300" r="4"/></g>
+<g fill="#f0aecb" opacity=".8"><circle cx="160" cy="70" r="5"/><circle cx="420" cy="540" r="6"/><circle cx="40" cy="430" r="4"/><circle cx="560" cy="200" r="5"/></g>
+<ellipse cx="300" cy="520" rx="200" ry="22" fill="#d996ae" opacity=".22"/>
+
+<circle cx="225" cy="165" r="40" fill="#d9a77f"/><circle cx="375" cy="165" r="40" fill="#d9a77f"/>
+<circle cx="225" cy="165" r="22" fill="#f6c2d6"/><circle cx="375" cy="165" r="22" fill="#f6c2d6"/>
+<ellipse cx="300" cy="400" rx="130" ry="115" fill="#e2b48e"/>
+<circle cx="300" cy="225" r="100" fill="#e2b48e"/>
+<ellipse cx="300" cy="258" rx="44" ry="34" fill="#f5dcc6"/>
+<ellipse cx="300" cy="244" rx="15" ry="10" fill="#5b3a3f"/>
+<path d="M300 254v12M286 272q14 10 28 0" stroke="#5b3a3f" stroke-width="5" fill="none" stroke-linecap="round"/>
+<circle cx="262" cy="212" r="9" fill="#4a3a40"/><circle cx="338" cy="212" r="9" fill="#4a3a40"/>
+<circle cx="250" cy="248" r="12" fill="#f3a3bf" opacity=".6"/><circle cx="350" cy="248" r="12" fill="#f3a3bf" opacity=".6"/>
+<ellipse cx="215" cy="480" rx="45" ry="30" fill="#d9a77f"/><ellipse cx="385" cy="480" rx="45" ry="30" fill="#d9a77f"/>
+<path d="M300 440q-90-60-90-110a45 45 0 0 1 90-18 45 45 0 0 1 90 18q0 50-90 110Z" fill="url(#rosaF)"/>
+<path d="M250 330q10-20 30-20" stroke="#fff" stroke-width="8" fill="none" stroke-linecap="round" opacity=".6"/>
+<rect x="420" y="400" width="120" height="80" rx="10" fill="#7b4a4f"/><rect x="420" y="390" width="120" height="26" rx="8" fill="#9c5f66"/>
+<path d="M480 390v90" stroke="#d4af37" stroke-width="12"/>
+<path d="M300 310l-26-18q-8 12 4 22zM300 310l26-18q8 12-4 22z" fill="#e9cf9a"/>
+
+</svg>
