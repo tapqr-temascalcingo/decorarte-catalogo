@@ -169,6 +169,27 @@
   .item-acciones .activo { color: var(--dorado-texto); }
   .item-acciones .apagado { color: var(--peligro); }
 
+  /* Foto subiendo en segundo plano */
+  .item-subida {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; border-top: 1px solid var(--borde);
+    background: var(--fondo-2); font-size: 15px; font-weight: 500; color: var(--texto);
+  }
+  .item-subida.error { background: #fdecea; color: var(--peligro); }
+  .item-subida button, .foto-estado .enlace {
+    margin-left: auto; border: 0; border-radius: 999px; cursor: pointer;
+    background: var(--peligro); color: #fff; font-weight: 600; font-size: 15px;
+    padding: 0 18px; min-height: 44px;
+  }
+  .foto-estado .enlace { margin-left: 8px; min-height: 36px; }
+  .foto-estado.error { background: #fdecea; color: var(--peligro); }
+  .girador-chico {
+    width: 18px; height: 18px; flex: none; display: inline-block; vertical-align: -3px;
+    border: 3px solid var(--rosa-claro); border-top-color: var(--rosa-fuerte);
+    border-radius: 50%; animation: girar .8s linear infinite;
+  }
+  .nota-fila { margin: -4px 0 12px; font-size: 13.5px; color: var(--dorado-texto); }
+
   .vacio { text-align: center; background: #fff; border-radius: 20px; padding: 26px 18px; box-shadow: var(--sombra); color: var(--texto-suave); }
   .vacio strong { display: block; color: var(--texto); font-family: var(--serif); font-size: 19px; margin-bottom: 4px; }
 

@@ -6,6 +6,15 @@ const ENDPOINT = 'https://script.google.com/macros/s/PRUEBA/exec';
 
 const tarjetas = (page) => page.locator('#lista .tarjeta');
 
+// Las pruebas no dependen de js/config.js real: por defecto, sin endpoint (modo demostración).
+// Las que prueban la conexión con Apps Script registran su propia configuración después, y esa gana.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/js/config.js', (r) => r.fulfill({
+    contentType: 'text/javascript',
+    body: "export const CONFIG = { endpoint: '', panel: '', whatsappRespaldo: '527122319080' };",
+  }));
+});
+
 function leerWhatsApp(href) {
   const url = new URL(href);
   return { telefono: url.searchParams.get('phone'), texto: url.searchParams.get('text') };
@@ -171,6 +180,33 @@ test.describe('conectado a Apps Script', () => {
     await expect(primera).toHaveAttribute('src', /drive\.google\.com\/thumbnail\?id=1FotoQueSiCarga.*&sz=w400/);
     await expect(primera).not.toHaveClass(/sin-foto/);
     await expect(tarjetas(page).nth(1).locator('img')).toHaveClass(/sin-foto/);
+  });
+
+  test('al volver a la pestaña (iPhone la guarda en memoria) vuelve a pedir los datos y muestra el cambio', async ({ page }) => {
+    let datos = { ...structuredClone(DEMO), demo: false };
+    let pedidos = 0;
+    await page.route(`${ENDPOINT}**`, (r) => { pedidos += 1; r.fulfill({ json: datos }); });
+    await page.goto('./');
+    await expect(tarjetas(page)).toHaveCount(8);
+    expect(pedidos).toBe(1);
+
+    datos = structuredClone(datos);
+    datos.config.ocasiones.push({ id: 'navidad', nombre: 'Navidad', emoji: '🎄' });
+    datos.productos[0].ocasiones.push('navidad');
+    datos.productos[0].nombre = 'Caja de rosas navideña';
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await expect(tarjetas(page).first().locator('.tarjeta-nombre')).toHaveText('Caja de rosas navideña');
+    await expect(page.locator('.chip', { hasText: 'Navidad' })).toBeVisible();
+    expect(pedidos).toBe(2);
+  });
+
+  test('una ocasión sin productos no aparece en los filtros', async ({ page }) => {
+    const datos = { ...structuredClone(DEMO), demo: false };
+    datos.config.ocasiones.push({ id: 'navidad', nombre: 'Navidad', emoji: '🎄' });
+    await page.route(`${ENDPOINT}**`, (r) => r.fulfill({ json: datos }));
+    await page.goto('./');
+    await expect(tarjetas(page)).toHaveCount(8);
+    await expect(page.locator('.chip', { hasText: 'Navidad' })).toHaveCount(0);
   });
 
   test('la API responde con error -> mensaje amable', async ({ page }) => {

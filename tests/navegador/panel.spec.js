@@ -1,39 +1,18 @@
 // Panel de administración corriendo en local: Codigo.gs real sobre el simulador de Google.
 import { test, expect } from '@playwright/test';
-
-/** Genera una foto JPEG de prueba en el navegador (como las de la cámara del celular). */
-async function fotoDePrueba(page, ancho, alto, tipo = 'image/jpeg') {
-  const base64 = await page.evaluate(async ([w, h, t]) => {
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const g = c.getContext('2d');
-    // Degradado con ruido para que el JPEG pese como una foto real
-    const grad = g.createLinearGradient(0, 0, w, h);
-    grad.addColorStop(0, '#f06292'); grad.addColorStop(1, '#ffd54f');
-    g.fillStyle = grad; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 4000; i++) {
-      g.fillStyle = `hsl(${Math.random() * 360},70%,${30 + Math.random() * 50}%)`;
-      g.fillRect(Math.random() * w, Math.random() * h, 3 + Math.random() * 40, 3 + Math.random() * 40);
-    }
-    const blob = await new Promise((r) => c.toBlob(r, t, 0.95));
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-    return btoa(s);
-  }, [ancho, alto, tipo]);
-  return Buffer.from(base64, 'base64');
-}
+import { fotoDePrueba, servirFotosSimuladas } from './ayudantes.js';
 
 test.describe('reducción de fotos', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/panel-local/'); });
 
   test('calcularTamano mantiene proporción y nunca agranda', async ({ page }) => {
     const r = await page.evaluate(() => [
-      calcularTamano(4000, 3000, 1200), calcularTamano(3000, 4000, 1200),
-      calcularTamano(800, 600, 1200), calcularTamano(1200, 1200, 1200), calcularTamano(5000, 100, 1200),
+      calcularTamano(4000, 3000), calcularTamano(3000, 4000),
+      calcularTamano(800, 600), calcularTamano(1080, 1080), calcularTamano(5000, 100), calcularTamano(4000, 3000, 1200),
     ]);
     expect(r).toEqual([
-      { ancho: 1200, alto: 900 }, { ancho: 900, alto: 1200 },
-      { ancho: 800, alto: 600 }, { ancho: 1200, alto: 1200 }, { ancho: 1200, alto: 24 },
+      { ancho: 1080, alto: 810 }, { ancho: 810, alto: 1080 },
+      { ancho: 800, alto: 600 }, { ancho: 1080, alto: 1080 }, { ancho: 1080, alto: 22 }, { ancho: 1200, alto: 900 },
     ]);
     await expect(page.evaluate(() => calcularTamano(0, 10))).rejects.toThrow();
   });
@@ -54,12 +33,13 @@ test.describe('reducción de fotos', () => {
         return { ancho: res.ancho, alto: res.alto, bytes: res.bytes, tipo: res.tipo, real: [img.width, img.height], base64ok: atob(res.base64).length === res.bytes };
       }, [original.toString('base64'), tipo]);
       expect(r.tipo).toBe('image/jpeg');
-      expect(Math.max(r.ancho, r.alto)).toBe(Math.min(1200, Math.max(w, h)));
+      expect(Math.max(r.ancho, r.alto)).toBeLessThanOrEqual(Math.min(1080, Math.max(w, h)));
+      expect(Math.max(r.ancho, r.alto)).toBeGreaterThanOrEqual(Math.min(700, Math.max(w, h)));
       expect(r.real).toEqual([r.ancho, r.alto]);
       expect(Math.abs(r.ancho / r.alto - w / h)).toBeLessThan(0.01);
-      expect(r.bytes).toBeLessThanOrEqual(450 * 1024);
+      expect(r.bytes).toBeLessThanOrEqual(250 * 1024);
       expect(r.base64ok).toBe(true);
-      if (w * h > 2e6) expect(r.bytes).toBeLessThan(original.length / 2);
+      if (w * h > 2e6) expect(r.bytes).toBeLessThan(original.length / 4);
     });
   }
 
@@ -71,19 +51,7 @@ test.describe('reducción de fotos', () => {
 
 test.describe('panel', () => {
   test.beforeEach(async ({ page }) => {
-    // Fotos subidas al "Drive" simulado: se sirven desde la memoria del simulador.
-    await page.route('https://lh3.googleusercontent.com/d/**', async (route) => {
-      const id = route.request().url().split('/d/')[1].split('=')[0];
-      const b64 = await page.evaluate((i) => {
-        const a = window.__simulador && __simulador.archivos[i];
-        if (!a) return null;
-        let s = '';
-        for (let j = 0; j < a.bytes.length; j += 0x8000) s += String.fromCharCode.apply(null, a.bytes.slice(j, j + 0x8000));
-        return btoa(s);
-      }, id).catch(() => null);
-      if (!b64) return route.fulfill({ status: 404 });
-      return route.fulfill({ contentType: 'image/jpeg', body: Buffer.from(b64, 'base64') });
-    });
+    await servirFotosSimuladas(page);
     await page.goto('/panel-local/');
     await expect(page.locator('.item')).toHaveCount(9);
   });
@@ -105,7 +73,7 @@ test.describe('panel', () => {
 
     const foto = await fotoDePrueba(page, 4000, 3000);
     await page.setInputFiles('#foto-galeria', { name: 'IMG_0001.jpg', mimeType: 'image/jpeg', buffer: foto });
-    await expect(page.locator('.foto-estado')).toContainText('1200×900');
+    await expect(page.locator('.foto-estado').first()).toContainText('1080×810');
 
     await page.fill('#f-nombre', 'Taza mágica');
     await page.fill('#f-descripcion', 'Cambia de color con el café caliente.');
@@ -114,15 +82,21 @@ test.describe('panel', () => {
     await page.click('[data-tipo-precio="desde"]');
     await page.fill('#f-precio', '180');
     await expect(page.locator('#previa-precio')).toHaveText('Desde $180');
+    await page.evaluate(() => { window.__demoraSubida = 1500; }); // señal lenta
     await page.click('[data-accion="guardar-producto"]');
 
+    // Se guarda al momento y la foto sigue subiendo en segundo plano
     await expect(page.locator('#aviso')).toContainText('agregado');
+    await expect(page.locator('#ocupado')).toBeHidden();
     await expect(page.locator('.item')).toHaveCount(10);
     const item = page.locator('.item', { hasText: 'Taza mágica' });
+    await expect(item.locator('.item-subida')).toContainText('Subiendo foto');
+    await expect(item.locator('.item-foto')).toHaveAttribute('src', /^blob:/);
+    expect((await page.evaluate(() => __gs.api())).productos.find((x) => x.nombre === 'Taza mágica').foto).toBe('');
+    await expect(item.locator('.item-subida')).toBeHidden({ timeout: 8000 });
     await expect(item.locator('.item-precio')).toHaveText('Desde $180');
-    await expect(item.locator('.item-foto')).not.toHaveClass(/sin-foto/);
 
-    const publico = await page.evaluate(() => JSON.parse(__gs.doGet({ parameter: { api: '' } }).getContent()));
+    const publico = await page.evaluate(() => __gs.api());
     const p = publico.productos.find((x) => x.nombre === 'Taza mágica');
     expect(p.ocasiones).toEqual(['10-de-mayo', 'dia-del-padre']);
     expect(p.tipoPrecio).toBe('desde');
@@ -131,7 +105,7 @@ test.describe('panel', () => {
       return { compartido: a.compartido, bytes: a.bytes.length, nombre: a.nombre };
     }, p.foto);
     expect(archivo.compartido).toBe(true);
-    expect(archivo.bytes).toBeLessThan(450 * 1024);
+    expect(archivo.bytes).toBeLessThan(250 * 1024);
     expect(archivo.nombre).toMatch(/^taza-magica-/);
   });
 
@@ -161,7 +135,7 @@ test.describe('panel', () => {
     await globos.locator('[data-accion="subir"]').click();
     await expect(page.locator('.lista').first().locator('.item-nombre').nth(2)).toHaveText('Arreglo de globos personalizado');
 
-    const publico = await page.evaluate(() => JSON.parse(__gs.doGet({ parameter: { api: '' } }).getContent()));
+    const publico = await page.evaluate(() => __gs.api());
     expect(publico.productos.map((p) => p.id)).not.toContain('p3');
   });
 
@@ -219,7 +193,7 @@ test.describe('panel', () => {
     await page.locator('[data-accion="guardar-listas"]').first().click();
     await expect(page.locator('#aviso')).toContainText('guardado');
 
-    const c = await page.evaluate(() => JSON.parse(__gs.doGet({ parameter: { api: '' } }).getContent()).config);
+    const c = await page.evaluate(() => __gs.api().config);
     expect(c.whatsappServicios).toBe('527129998877');
     expect(c.direccion).toBe('Av. Juárez 10, Centro, Temascalcingo');
     expect(c.temporada).toBe('10-de-mayo');

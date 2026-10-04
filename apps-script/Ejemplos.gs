@@ -1,0 +1,205 @@
+/**
+ * Productos de ejemplo que carga "cargarEjemplos". Archivo generado desde datos/demo.json
+ * con `npm run ejemplos`; no lo edites a mano.
+ */
+const EJEMPLOS = {
+  "productos": [
+    {
+      "id": "p1",
+      "nombre": "Caja de rosas eternas",
+      "descripcion": "Caja sombrerera con rosas preservadas que duran hasta un año. Elige el color de rosas y del moño.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "san-valentin",
+        "aniversario",
+        "10-de-mayo"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 650,
+      "foto": "img/demo/rosas.svg",
+      "disponible": true,
+      "destacado": true,
+      "orden": 1
+    },
+    {
+      "id": "p2",
+      "nombre": "Desayuno sorpresa",
+      "descripcion": "Charola con taza personalizada, pan dulce, fruta, jugo y una flor. Lo entregamos a domicilio en Temascalcingo.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "10-de-mayo",
+        "aniversario",
+        "dia-del-padre",
+        "san-valentin"
+      ],
+      "tipoPrecio": "desde",
+      "precio": 450,
+      "foto": "img/demo/desayuno.svg",
+      "disponible": true,
+      "destacado": true,
+      "orden": 2
+    },
+    {
+      "id": "p3",
+      "nombre": "Oso con chocolates",
+      "descripcion": "Peluche suave con corazón y caja de chocolates surtidos, envuelto para regalo.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "san-valentin",
+        "10-de-mayo"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 420,
+      "foto": "img/demo/oso.svg",
+      "disponible": true,
+      "destacado": true,
+      "orden": 3
+    },
+    {
+      "id": "p4",
+      "nombre": "Arreglo de globos personalizado",
+      "descripcion": "Bouquet de globos con nombre o frase. Tú eliges colores y figuras.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "graduaciones",
+        "baby-shower",
+        "san-valentin",
+        "aniversario"
+      ],
+      "tipoPrecio": "desde",
+      "precio": 380,
+      "foto": "img/demo/globos.svg",
+      "disponible": true,
+      "destacado": false,
+      "orden": 4
+    },
+    {
+      "id": "p5",
+      "nombre": "Pastel de pañales",
+      "descripcion": "Tres pisos de pañales decorados con moños, calcetitas y un detalle para el bebé.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "baby-shower"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 720,
+      "foto": "img/demo/panales.svg",
+      "disponible": true,
+      "destacado": false,
+      "orden": 5
+    },
+    {
+      "id": "p6",
+      "nombre": "Kit para papá",
+      "descripcion": "Caja de madera con cervezas artesanales, botana y una tarjeta con su nombre.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "dia-del-padre"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 499,
+      "foto": "img/demo/papa.svg",
+      "disponible": true,
+      "destacado": false,
+      "orden": 6
+    },
+    {
+      "id": "p7",
+      "nombre": "Caja de graduación",
+      "descripcion": "Caja con birrete, globo metálico, dulces y una tarjeta para felicitar al graduado.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "graduaciones"
+      ],
+      "tipoPrecio": "desde",
+      "precio": 350,
+      "foto": "img/demo/graduacion.svg",
+      "disponible": true,
+      "destacado": false,
+      "orden": 7
+    },
+    {
+      "id": "p8",
+      "nombre": "Marco con foto personalizado",
+      "descripcion": "Marco de madera grabado con su foto favorita y una frase especial.",
+      "categoria": "regalos",
+      "ocasiones": [
+        "aniversario",
+        "graduaciones",
+        "10-de-mayo"
+      ],
+      "tipoPrecio": "consultar",
+      "precio": null,
+      "foto": "",
+      "disponible": true,
+      "destacado": false,
+      "orden": 8
+    },
+    {
+      "id": "s1",
+      "nombre": "Mesa de charcutería",
+      "descripcion": "Montamos una mesa de quesos, carnes frías, frutas, panes y dulces, decorada a juego con tu evento.",
+      "categoria": "servicios",
+      "ocasiones": [
+        "baby-shower",
+        "aniversario",
+        "graduaciones"
+      ],
+      "tipoPrecio": "desde",
+      "precio": 1200,
+      "foto": "img/demo/charcuteria.svg",
+      "disponible": true,
+      "destacado": false,
+      "orden": 1
+    }
+  ],
+  "paquetes": [
+    {
+      "id": "k1",
+      "servicioId": "s1",
+      "nombre": "Mini",
+      "descripcion": "Para reuniones íntimas.",
+      "incluye": [
+        "Hasta 10 personas",
+        "Tabla de 60 cm",
+        "3 tipos de queso y 2 de carnes frías"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 1200,
+      "disponible": true,
+      "orden": 1
+    },
+    {
+      "id": "k2",
+      "servicioId": "s1",
+      "nombre": "Fiesta",
+      "descripcion": "El favorito para cumpleaños y baby showers.",
+      "incluye": [
+        "Hasta 25 personas",
+        "Mesa de 1.20 m decorada",
+        "Fruta de temporada y dulces"
+      ],
+      "tipoPrecio": "fijo",
+      "precio": 2600,
+      "disponible": true,
+      "orden": 2
+    },
+    {
+      "id": "k3",
+      "servicioId": "s1",
+      "nombre": "Gran evento",
+      "descripcion": "Para bodas, XV años y graduaciones.",
+      "incluye": [
+        "50 personas o más",
+        "Montaje completo con flores",
+        "Personal durante el evento"
+      ],
+      "tipoPrecio": "desde",
+      "precio": 4800,
+      "disponible": true,
+      "orden": 3
+    }
+  ],
+  "temporada": "san-valentin",
+  "temporadaTitulo": "Especial de San Valentín"
+};

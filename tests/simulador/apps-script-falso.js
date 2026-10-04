@@ -1,20 +1,33 @@
 /*
  * Simulador mínimo de los servicios de Google Apps Script que usa apps-script/Codigo.gs:
- * SpreadsheetApp, DriveApp, CacheService, PropertiesService, Session, LockService, Utilities,
- * ContentService y HtmlService. Guarda todo en memoria.
+ * SpreadsheetApp, Drive (servicio avanzado v3 con reglas de drive.file), CacheService,
+ * PropertiesService, Session, LockService, Utilities, ContentService y HtmlService. Todo en memoria.
  *
  * Sirve en Node (pruebas, con vm) y en el navegador (panel local para capturas).
- * Uso: const entorno = crearEntornoAppsScript({ usuario: 'duena@gmail.com' });
+ *
+ * Quién usa el script:
+ *   estado.usuario      correo de la sesión ('' = sin sesión)       -> Session.getActiveUser()
+ *   estado.ejecutaComo  'usuario' (implementación Panel) o 'propietario' (API catálogo / editor)
+ *   El usuario efectivo es quien "es dueño" de lo que se crea en Drive.
  */
 (function (raiz) {
   function crearEntornoAppsScript(opciones) {
     opciones = opciones || {};
     const estado = {
-      usuario: opciones.usuario || '',
-      propietario: opciones.propietario || opciones.usuario || 'duena@gmail.com',
+      usuario: opciones.usuario === undefined ? 'duena@gmail.com' : opciones.usuario,
+      propietario: opciones.propietario || 'duena@gmail.com',
+      ejecutaComo: opciones.ejecutaComo || 'usuario',
       archivosHtml: opciones.archivosHtml || {},
       contador: 0,
+      fallas: {}, // nombre de operación -> número de veces que debe fallar (para simular cortes)
     };
+    const efectivo = () => (estado.ejecutaComo === 'propietario' ? estado.propietario : estado.usuario);
+    function quizaFallar(operacion) {
+      if (estado.fallas[operacion] > 0) {
+        estado.fallas[operacion] -= 1;
+        throw new Error('Falla simulada en ' + operacion);
+      }
+    }
 
     const encadenable = (obj) => new Proxy(obj, {
       get: (o, k) => (k in o ? o[k] : () => encadenable(o)),
@@ -79,59 +92,92 @@
       return encadenable(hoja);
     }
 
-    const libro = (() => {
-      const hojas = [crearHoja('Hoja 1')];
-      return encadenable({
-        getId: () => 'libro-de-prueba',
-        getSheetByName: (n) => hojas.find((h) => h.getName() === n) || null,
-        getSheets: () => hojas.slice(),
-        insertSheet(n) { const h = crearHoja(n); hojas.push(h); return h; },
-        deleteSheet(h) { hojas.splice(hojas.indexOf(h), 1); },
-      });
-    })();
+    const hojas = [crearHoja('Hoja 1')];
+    const libro = encadenable({
+      getId: () => 'libro-de-prueba',
+      getSheetByName: (n) => hojas.find((h) => h.getName() === n) || null,
+      getSheets: () => hojas.slice(),
+      insertSheet(n) {
+        quizaFallar('insertSheet');
+        if (hojas.some((h) => h.getName() === n)) throw new Error(`Ya existe una hoja con el nombre "${n}"`);
+        const h = crearHoja(n);
+        hojas.push(h);
+        return h;
+      },
+      deleteSheet(h) { hojas.splice(hojas.indexOf(h), 1); },
+      toast(m) { estado.ultimoAviso = m; },
+    });
 
     const SpreadsheetApp = {
       getActiveSpreadsheet: () => libro,
       openById: () => libro,
       flush() {},
-      getUi: () => encadenable({ alert(m) { estado.ultimaAlerta = m; } }),
+      getUi: () => encadenable({
+        alert() { throw new Error('alert() bloquearía la ejecución: no se debe usar'); },
+      }),
     };
 
-    /* ---------- Drive ---------- */
+    /* ---------- Drive (servicio avanzado v3, reglas de drive.file) ---------- */
+    // drive.file: cada cuenta solo puede ver y modificar los archivos que creó con esta app.
     const archivos = {};
-    const carpetas = {};
     function nuevoId() {
       estado.contador += 1;
       return ('1SimuladoDrive' + String(estado.contador).padStart(6, '0') + 'xxxxxxxxxx').slice(0, 33);
     }
-    function crearCarpeta(nombre) {
-      const id = nuevoId();
-      const carpeta = encadenable({
-        getId: () => id,
-        getName: () => nombre,
-        createFile(blob) {
-          const fid = nuevoId();
-          const archivo = { id: fid, nombre: blob.getName(), tipo: blob.getContentType(), bytes: blob.getBytes(), compartido: false, enPapelera: false, carpeta: id };
-          archivos[fid] = archivo;
-          return encadenable({
-            getId: () => fid,
-            setSharing() { archivo.compartido = true; return this; },
-          });
-        },
-        setSharing() { return carpeta; },
-      });
-      carpetas[id] = carpeta;
-      return carpeta;
+    function accesible(id) {
+      const a = archivos[id];
+      if (!a || a.dueno !== efectivo()) {
+        const e = new Error(`GoogleJsonResponseException: File not found: ${id}.`);
+        throw e;
+      }
+      return a;
     }
-    const DriveApp = {
-      Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK' },
-      Permission: { VIEW: 'VIEW' },
-      createFolder: crearCarpeta,
-      getFolderById(id) { if (!carpetas[id]) throw new Error('No existe la carpeta'); return carpetas[id]; },
-      getFileById(id) {
-        const a = archivos[id];
-        if (!a) throw new Error('No existe el archivo');
-        return encadenable({ setTrashed(v) { a.enPapelera = !!v; return this; }, getId: () => id });
+    const Drive = {
+      Files: {
+        create(recurso, blob) {
+          quizaFallar(recurso.mimeType === 'application/vnd.google-apps.folder' ? 'crearCarpeta' : 'crearArchivo');
+          if (recurso.parents) recurso.parents.forEach(accesible);
+          const id = nuevoId();
+          archivos[id] = {
+            id,
+            nombre: recurso.name,
+            tipo: recurso.mimeType || (blob && blob.getContentType()),
+            carpeta: recurso.parents ? recurso.parents[0] : null,
+            appProperties: recurso.appProperties || {},
+            bytes: blob ? blob.getBytes() : null,
+            dueno: efectivo(),
+            compartido: false,
+            enPapelera: false,
+          };
+          return { id, name: recurso.name };
+        },
+        get(id) {
+          const a = accesible(id);
+          return { id: a.id, trashed: a.enPapelera };
+        },
+        update(recurso, id) {
+          const a = accesible(id);
+          if ('trashed' in recurso) a.enPapelera = !!recurso.trashed;
+          return { id };
+        },
+        list(opciones) {
+          const q = opciones.q || '';
+          const clave = /appProperties has \{ key='(\w+)' and value='(\w+)' \}/.exec(q);
+          const files = Object.values(archivos).filter((a) => a.dueno === efectivo()
+            && (!/trashed=false/.test(q) || !a.enPapelera)
+            && (!/mimeType='application\/vnd\.google-apps\.folder'/.test(q) || a.tipo === 'application/vnd.google-apps.folder')
+            && (!clave || a.appProperties[clave[1]] === clave[2]))
+            .slice(0, opciones.pageSize || 100)
+            .map((a) => ({ id: a.id }));
+          return { files };
+        },
+      },
+      Permissions: {
+        create(permiso, id) {
+          const a = accesible(id);
+          if (permiso.type === 'anyone' && permiso.role === 'reader') a.compartido = true;
+          return { id: 'anyoneWithLink' };
+        },
       },
     };
 
@@ -147,17 +193,23 @@
         removeAll: (ks) => ks.forEach((k) => { delete memoriaCache[k]; }),
       }),
     };
+    function almacenPropiedades(datos) {
+      return {
+        getProperty: (k) => (k in datos ? datos[k] : null),
+        setProperty: (k, v) => { datos[k] = String(v); },
+        setProperties: (o) => { Object.keys(o).forEach((k) => { datos[k] = String(o[k]); }); },
+        deleteProperty: (k) => { delete datos[k]; },
+      };
+    }
     const propiedades = {};
+    const propiedadesUsuario = {};
     const PropertiesService = {
-      getScriptProperties: () => ({
-        getProperty: (k) => (k in propiedades ? propiedades[k] : null),
-        setProperty: (k, v) => { propiedades[k] = String(v); },
-        setProperties: (o) => { Object.keys(o).forEach((k) => { propiedades[k] = String(o[k]); }); },
-      }),
+      getScriptProperties: () => almacenPropiedades(propiedades),
+      getUserProperties: () => almacenPropiedades(propiedadesUsuario[efectivo()] || (propiedadesUsuario[efectivo()] = {})),
     };
     const Session = {
       getActiveUser: () => ({ getEmail: () => estado.usuario }),
-      getEffectiveUser: () => ({ getEmail: () => estado.propietario }),
+      getEffectiveUser: () => ({ getEmail: () => efectivo() }),
     };
     const LockService = { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) };
 
@@ -180,31 +232,27 @@
     const ContentService = {
       MimeType: { JSON: 'application/json' },
       createTextOutput: (texto) => {
-        const salida = { texto, tipo: 'text/plain', setMimeType(t) { salida.tipo = t; return salida; }, getContent: () => texto };
+        const salida = { texto, tipo: 'text/plain', esHtml: false, setMimeType(t) { salida.tipo = t; return salida; }, getContent: () => texto };
         return salida;
       },
     };
     function salidaHtml(contenido) {
-      const s = { contenido, titulo: '', setTitle(t) { s.titulo = t; return proxy; }, getContent: () => s.contenido };
+      const s = { contenido, titulo: '', esHtml: true, setTitle(t) { s.titulo = t; return proxy; }, getContent: () => s.contenido };
       const proxy = encadenable(s);
       return proxy;
     }
     const HtmlService = {
       createHtmlOutput: (html) => salidaHtml(html),
       createHtmlOutputFromFile: (n) => salidaHtml(estado.archivosHtml[n] || ''),
-      createTemplateFromFile: (n) => {
-        const plantilla = { _archivo: n, evaluate: () => salidaHtml(`[plantilla ${n}]`) };
-        return plantilla;
-      },
+      createTemplateFromFile: (n) => ({ _archivo: n, evaluate: () => salidaHtml(`[plantilla ${n}]`) }),
     };
 
     return {
       // globales de Apps Script
-      SpreadsheetApp, DriveApp, CacheService, PropertiesService, Session, LockService, Utilities,
+      SpreadsheetApp, Drive, CacheService, PropertiesService, Session, LockService, Utilities,
       ContentService, HtmlService, Logger: { log() {} },
-      UrlFetchApp: { fetch() { throw new Error('UrlFetchApp no disponible en el simulador'); } },
       // para inspeccionar desde las pruebas
-      __simulador: { estado, libro, archivos, carpetas, memoriaCache, propiedades },
+      __simulador: { estado, libro, archivos, memoriaCache, propiedades, propiedadesUsuario },
     };
   }
 

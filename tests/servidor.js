@@ -18,7 +18,7 @@ const escapar = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;'
 /** Evalúa una plantilla de Apps Script (<?= ?> y <?!= ?>) igual que HtmlService. */
 async function plantilla(nombre, contexto) {
   const leerHtml = (n) => readFileSync(join(RAIZ, 'apps-script', n + '.html'), 'utf8');
-  const ctx = { ...contexto, incluir: leerHtml };
+  const ctx = { ...contexto, incluir_: leerHtml };
   return leerHtml(nombre).replace(/<\?(!?=)\s*([\s\S]*?)\s*\?>/g, (_, tipo, expr) => {
     const valor = String(Function(...Object.keys(ctx), `return (${expr});`)(...Object.values(ctx)));
     return tipo === '!=' ? valor : escapar(valor);

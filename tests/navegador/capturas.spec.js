@@ -28,6 +28,9 @@ async function sinConfeti(page) {
 }
 
 test('catálogo', async ({ page }) => {
+  await page.route('**/js/config.js', (r) => r.fulfill({
+    contentType: 'text/javascript', body: "export const CONFIG = { endpoint: '', panel: '', whatsappRespaldo: '' };",
+  }));
   await page.goto('./');
   await sinConfeti(page);
   await expect(page.locator('#lista .tarjeta')).toHaveCount(8);
@@ -73,7 +76,7 @@ test('panel', async ({ page }) => {
   // Nuevo producto con foto
   await page.click('[data-accion="nuevo-producto"]');
   await page.setInputFiles('#foto-galeria', { name: 'IMG_2041.png', mimeType: 'image/png', buffer: await fotoBonita(page, 'rosas.svg') });
-  await expect(page.locator('.foto-estado')).toContainText('1200×1200');
+  await expect(page.locator('.foto-estado').first()).toContainText('1080×1080');
   await page.fill('#f-nombre', 'Caja de rosas rojas');
   await page.fill('#f-descripcion', 'Doce rosas naturales en caja redonda con moño dorado.');
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -92,10 +95,30 @@ test('panel', async ({ page }) => {
   await page.waitForTimeout(300);
   await guardar(page, '14-panel-visible-destacado');
 
+  await page.evaluate(() => { window.__demoraSubida = 4000; });
   await page.click('[data-accion="guardar-producto"]');
   await expect(page.locator('#aviso')).toBeVisible();
+  const nueva = page.locator('.item', { hasText: 'Caja de rosas rojas' });
+  await nueva.scrollIntoViewIfNeeded();
+  await expect(nueva.locator('.item-subida')).toContainText('Subiendo foto');
   await page.waitForTimeout(300);
   await guardar(page, '15-panel-guardado');
+  await guardar(nueva, '15b-panel-subiendo-foto');
+  await expect(nueva.locator('.item-subida')).toBeHidden({ timeout: 10000 });
+
+  await page.evaluate(() => { window.__demoraSubida = 0; window.__falloSubida = 1; });
+  await page.locator('.item', { hasText: 'Oso con chocolates' }).locator('.item-principal').click();
+  await page.setInputFiles('#foto-galeria', { name: 'IMG_2042.png', mimeType: 'image/png', buffer: await fotoBonita(page, 'oso.svg') });
+  await expect(page.locator('.foto-estado').first()).toContainText('Foto lista');
+  await page.click('[data-accion="guardar-producto"]');
+  const oso = page.locator('.item', { hasText: 'Oso con chocolates' });
+  await expect(oso.locator('.item-subida.error')).toBeVisible();
+  await page.waitForTimeout(6500); // que se quite el aviso rojo
+  await oso.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(300);
+  await guardar(oso, '15c-panel-foto-reintentar');
+  await oso.getByRole('button', { name: 'Reintentar' }).click();
+  await expect(oso.locator('.item-subida')).toBeHidden({ timeout: 10000 });
 
   // Confirmación al eliminar
   await page.waitForTimeout(2800);
@@ -123,6 +146,14 @@ test('panel', async ({ page }) => {
     const h = [...document.querySelectorAll('h2')].find((x) => x.textContent.includes('Ocasiones'));
     window.scrollTo(0, h.getBoundingClientRect().top + scrollY - 80);
   });
+  await page.click('[data-accion="agregar-fila"][data-lista="ocasiones"]');
+  await page.locator('[data-lista="ocasiones"][data-prop="emoji"]').last().fill('🎄');
+  await page.locator('[data-lista="ocasiones"][data-prop="nombre"]').last().fill('Navidad');
+  await page.locator('[data-accion="guardar-listas"]').first().click();
+  await expect(page.locator('.nota-fila')).toBeVisible();
+  await page.waitForTimeout(2900);
+  await page.locator('.nota-fila').scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 160));
   await page.waitForTimeout(300);
   await guardar(page, '21-panel-ajustes-ocasiones');
 });
@@ -142,4 +173,18 @@ test('acceso directo y página de sin acceso', async ({ page }) => {
   await page.setContent(html.replace(/https:\/\/tapqr-temascalcingo\.github\.io\/decorarte-catalogo\//g, 'http://localhost:8090/'));
   await page.waitForTimeout(600);
   await guardar(page, '23-sin-acceso');
+});
+
+test.describe('ayuda en iPhone', () => {
+  test.use({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
+  test('ayuda para varias cuentas', async ({ page }) => {
+    await page.route('**/js/config.js', (r) => r.fulfill({
+      contentType: 'text/javascript',
+      body: "export const CONFIG = { endpoint: '', panel: 'https://script.google.com/macros/s/EJEMPLO/exec', whatsappRespaldo: '' };",
+    }));
+    await page.goto('/panel/?ayuda');
+    await page.locator('#ayuda').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
+    await guardar(page.locator('#ayuda'), '24-ayuda-varias-cuentas');
+  });
 });

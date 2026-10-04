@@ -69,9 +69,17 @@ async function pedirDatos() {
   }
 }
 
-async function iniciar() {
+// La página se pinta al instante con la copia guardada en el teléfono y se actualiza en cuanto
+// llegan los datos nuevos. También se revisa al volver a la pestaña: Safari en iPhone suele
+// mostrar la página que tenía en memoria sin recargarla.
+let ultimaConsulta = 0;
+let consultando = false;
+
+async function actualizarDesdeServidor() {
+  if (consultando) return;
+  consultando = true;
+  ultimaConsulta = Date.now();
   const cache = leerCache();
-  if (cache) aplicar(cache);
   try {
     const nuevo = await pedirDatos();
     if (!cache || JSON.stringify(cache) !== JSON.stringify(nuevo)) {
@@ -80,9 +88,25 @@ async function iniciar() {
     }
   } catch (err) {
     console.warn('No se pudo cargar el catálogo:', err);
-    if (!cache) mostrarError();
+    if (!cache && !estado.datos) mostrarError();
+  } finally {
+    consultando = false;
   }
 }
+
+function iniciar() {
+  const cache = leerCache();
+  if (cache) aplicar(cache);
+  actualizarDesdeServidor();
+}
+
+const REVISAR_CADA = 10_000;
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted) actualizarDesdeServidor();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && Date.now() - ultimaConsulta > REVISAR_CADA) actualizarDesdeServidor();
+});
 
 function aplicar(crudo) {
   estado.datos = normalizarDatos(crudo);

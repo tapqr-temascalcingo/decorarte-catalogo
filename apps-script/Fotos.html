@@ -1,10 +1,11 @@
 <script>
 /* Reducción de fotos en el celular antes de subirlas a Drive.
-   Una foto de 4000×3000 (3–6 MB) queda en ~1200 px y ~150–300 KB: sube rápido aunque la señal sea mala. */
+   Una foto de celular de 4000×3000 (3–6 MB) queda en 1080 px y ≤250 KB: sube rápido aunque la señal sea mala.
+   El catálogo nunca la muestra a más de 900 px de ancho, así que no se nota la diferencia. */
 
 /** Tamaño final manteniendo la proporción; nunca agranda. */
 function calcularTamano(ancho, alto, maximo) {
-  maximo = maximo || 1200;
+  maximo = maximo || 1080;
   if (!(ancho > 0 && alto > 0)) throw new Error('Imagen sin tamaño');
   var escala = Math.min(1, maximo / Math.max(ancho, alto));
   return { ancho: Math.max(1, Math.round(ancho * escala)), alto: Math.max(1, Math.round(alto * escala)) };
@@ -50,7 +51,7 @@ function blobABase64_(blob) {
  * Devuelve { base64, tipo, ancho, alto, bytes, blob }.
  */
 async function reducirImagen(archivo, opciones) {
-  opciones = Object.assign({ maximo: 1200, calidad: 0.82, maxBytes: 450 * 1024 }, opciones || {});
+  opciones = Object.assign({ maximo: 1080, calidad: 0.8, maxBytes: 250 * 1024 }, opciones || {});
   if (!archivo || !/^image\//.test(archivo.type || 'image/')) throw new Error('El archivo no es una foto.');
   var img = await cargarImagen_(archivo);
   var tam = calcularTamano(img.width || img.naturalWidth, img.height || img.naturalHeight, opciones.maximo);
@@ -68,6 +69,18 @@ async function reducirImagen(archivo, opciones) {
   var blob = await canvasABlob_(canvas, 'image/jpeg', calidad);
   while (blob.size > opciones.maxBytes && calidad > 0.5) {
     calidad = Math.round((calidad - 0.08) * 100) / 100;
+    blob = await canvasABlob_(canvas, 'image/jpeg', calidad);
+  }
+  // Fotos con muchísimo detalle: si aún pesa de más, se achica un poco más.
+  while (blob.size > opciones.maxBytes && Math.max(canvas.width, canvas.height) > 600) {
+    var chico = document.createElement('canvas');
+    chico.width = Math.round(canvas.width * 0.85);
+    chico.height = Math.round(canvas.height * 0.85);
+    var c2 = chico.getContext('2d');
+    c2.imageSmoothingQuality = 'high';
+    c2.drawImage(canvas, 0, 0, chico.width, chico.height);
+    canvas = chico;
+    tam = { ancho: chico.width, alto: chico.height };
     blob = await canvasABlob_(canvas, 'image/jpeg', calidad);
   }
   return { base64: await blobABase64_(blob), tipo: 'image/jpeg', ancho: tam.ancho, alto: tam.alto, bytes: blob.size, blob: blob };

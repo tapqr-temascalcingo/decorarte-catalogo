@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600&display=swap">
-  <?!= incluir('PanelEstilos') ?>
+  <?!= incluir_('PanelEstilos') ?>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -71,7 +71,7 @@
   <script>
     var PANEL = { urlCatalogo: <?!= JSON.stringify(urlCatalogo) ?>, urlLogo: <?!= JSON.stringify(urlLogo) ?> };
   </script>
-  <?!= incluir('Fotos') ?>
-  <?!= incluir('PanelApp') ?>
+  <?!= incluir_('Fotos') ?>
+  <?!= incluir_('PanelApp') ?>
 </body>
 </html>

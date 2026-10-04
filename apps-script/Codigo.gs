@@ -2,11 +2,15 @@
  * Decorarte · Panel de administración y datos del catálogo.
  * Google Apps Script ligado a la hoja de cálculo de la dueña.
  *
- * Una sola copia de este código se publica dos veces (ver INSTALACION.md):
- *  - "API catálogo": Ejecutar como YO · Acceso: Cualquier persona.
- *     El catálogo pide  <url>/exec?api  y recibe el JSON público (con caché).
- *  - "Panel": Ejecutar como USUARIO QUE ACCEDE · Acceso: Cualquier usuario con cuenta de Google.
- *     Solo entran los correos de "autorizados" en la pestaña Configuración.
+ * El mismo proyecto se publica dos veces (ver INSTALACION.md). Cada implementación queda fijada
+ * a una versión del código donde Implementacion.gs dice qué es:
+ *  - "API catálogo" (IMPLEMENTACION = 'api'): Ejecutar como YO · Acceso: Cualquier persona.
+ *     Siempre responde el JSON público del catálogo. Nunca muestra páginas ni acepta cambios.
+ *  - "Panel" (IMPLEMENTACION = 'panel'): Ejecutar como USUARIO QUE ACCEDE · Acceso: Cualquier
+ *     usuario con cuenta de Google. Solo entran los correos de "autorizados" en Configuración.
+ *
+ * Permisos (appsscript.json): hojas de cálculo, drive.file (solo los archivos que crea esta app,
+ * mediante el servicio avanzado de Drive) y el correo de quien entra.
  */
 
 const HOJA_PRODUCTOS = 'Productos';
@@ -15,8 +19,9 @@ const HOJA_CONFIG = 'Configuración';
 const URL_CATALOGO = 'https://tapqr-temascalcingo.github.io/decorarte-catalogo/';
 const URL_LOGO = URL_CATALOGO + 'img/logo-192.png';
 const NOMBRE_CARPETA = 'Decorarte Catálogo – Fotos';
-const CLAVE_CACHE = 'catalogo-v1';
-const DURACION_CACHE = 3600; // segundos; se borra en cuanto se guarda un cambio
+const TIPO_CARPETA = 'application/vnd.google-apps.folder';
+const CLAVE_CACHE = 'catalogo-v2';
+const DURACION_CACHE = 21600; // 6 h, el máximo. Cada cambio guardado usa una clave nueva.
 const TIPOS_PRECIO = ['fijo', 'desde', 'consultar'];
 
 // Columnas de cada pestaña: clave interna -> encabezado que se ve en la hoja.
@@ -62,12 +67,25 @@ const CONFIG_INICIAL = [
 ];
 
 /* =====================================================================
+ *  Implementación: 'api' o 'panel'
+ * ===================================================================== */
+
+/** true solo si Implementacion.gs dice exactamente 'panel'. Si falta o dice otra cosa: modo API. */
+function esPanel_() {
+  try {
+    return IMPLEMENTACION === 'panel'; // eslint-disable-line no-undef
+  } catch (e) {
+    return false;
+  }
+}
+
+/* =====================================================================
  *  Entradas web
  * ===================================================================== */
 
-function doGet(e) {
-  const p = (e && e.parameter) || {};
-  if ('api' in p) return respuestaApi_();
+function doGet() {
+  // Implementación "API catálogo": siempre JSON, con o sin ?api, con o sin sesión. Nunca HTML.
+  if (!esPanel_()) return respuestaApi_();
 
   const correo = correoActual_();
   if (!estaAutorizado_(correo)) return paginaSinAcceso_(correo);
@@ -82,8 +100,8 @@ function doGet(e) {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
-/** Para insertar archivos HTML dentro de otros: <?!= incluir('PanelEstilos') ?> */
-function incluir(nombre) {
+/** Para insertar archivos HTML dentro de otros: <?!= incluir_('PanelEstilos') ?> */
+function incluir_(nombre) {
   return HtmlService.createHtmlOutputFromFile(nombre).getContent();
 }
 
@@ -119,93 +137,117 @@ function paginaSinAcceso_(correo) {
  * ===================================================================== */
 
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Decorarte')
-    .addItem('1. Preparar hoja (instalar)', 'instalar')
-    .addItem('Cargar productos de ejemplo', 'cargarEjemplos')
-    .addItem('Publicar cambios hechos a mano en la hoja', 'publicarCambios')
-    .addToUi();
+  try {
+    SpreadsheetApp.getUi().createMenu('Decorarte')
+      .addItem('Preparar hoja (instalar)', 'instalar')
+      .addItem('Cargar productos de ejemplo', 'cargarEjemplos')
+      .addItem('Publicar cambios hechos a mano en la hoja', 'publicarCambios')
+      .addToUi();
+  } catch (e) { /* sin interfaz disponible: el menú es solo una comodidad */ }
 }
 
 /** Si alguien edita la hoja a mano, el catálogo se actualiza al momento. */
-function onEdit() {
-  invalidarCache_();
+function onEdit(e) {
+  // Solo para ediciones reales en la hoja: un objeto armado desde fuera no trae funciones.
+  if (!e || !e.range || typeof e.range.getSheet !== 'function') return;
+  nuevaVersionDatos_();
 }
 
 function publicarCambios() {
-  invalidarCache_();
+  verificarDuena_();
+  refrescarCache_();
   avisar_('Listo: el catálogo ya muestra la información actual de la hoja.');
 }
 
 /**
  * Crea las pestañas, encabezados, configuración inicial y la carpeta de fotos.
- * Se puede ejecutar varias veces: no borra nada que ya exista.
+ * Cada paso revisa lo que ya existe, así que si se corta a medias basta con ejecutarla otra vez:
+ * continúa donde se quedó sin duplicar pestañas, renglones ni carpetas.
  */
 function instalar() {
+  verificarDuena_();
+  const props = PropertiesService.getScriptProperties();
   const libro = libro_();
-  PropertiesService.getScriptProperties().setProperties({
-    idHoja: libro.getId(),
-    propietario: (Session.getEffectiveUser().getEmail() || '').toLowerCase(),
-  });
-
-  [HOJA_PRODUCTOS, HOJA_PAQUETES].forEach((nombre) => {
-    const hoja = libro.getSheetByName(nombre) || libro.insertSheet(nombre);
-    const columnas = COLUMNAS[nombre];
-    if (hoja.getLastRow() === 0) {
-      hoja.getRange(1, 1, 1, columnas.length).setValues([columnas.map((c) => c[1])]);
-    }
-    hoja.setFrozenRows(1);
-    hoja.getRange(1, 1, 1, columnas.length).setFontWeight('bold').setBackground('#f8d7e2');
-    // Texto plano para que Sheets no convierta IDs ni listas en números o fechas.
-    ['id', 'servicioId', 'ocasiones', 'foto', 'incluye', 'categoria'].forEach((clave) => {
-      const i = columnas.findIndex((c) => c[0] === clave);
-      if (i >= 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
-    });
-  });
-
-  const hojaConfig = libro.getSheetByName(HOJA_CONFIG) || libro.insertSheet(HOJA_CONFIG);
-  if (hojaConfig.getLastRow() === 0) {
-    hojaConfig.getRange(1, 1, 1, 3).setValues([['Clave', 'Valor', 'Nota']]).setFontWeight('bold').setBackground('#f8d7e2');
-    hojaConfig.setFrozenRows(1);
-  }
-  hojaConfig.getRange('B:B').setNumberFormat('@').setWrap(true);
-  const existente = leerConfigCruda_();
-  const faltantes = CONFIG_INICIAL.filter((fila) => !(fila[0] in existente));
-  if (faltantes.length) {
-    hojaConfig.getRange(hojaConfig.getLastRow() + 1, 1, faltantes.length, 3).setValues(faltantes);
-  }
-
-  const config = leerConfigCruda_();
-  if (!lineas_(config.autorizados).length) {
-    guardarClavesConfig_({ autorizados: PropertiesService.getScriptProperties().getProperty('propietario') });
-  }
+  if (!props.getProperty('propietario')) props.setProperty('propietario', correoActual_());
+  props.setProperty('idHoja', libro.getId());
+  registrar_('1/4 Pestañas');
+  prepararPestanas_(libro);
+  registrar_('2/4 Configuración');
+  prepararConfig_(libro);
+  registrar_('3/4 Carpeta de fotos');
   carpetaFotos_();
-
+  registrar_('4/4 Publicar');
   const sobrante = libro.getSheetByName('Hoja 1') || libro.getSheetByName('Sheet1');
   if (sobrante && libro.getSheets().length > 1 && sobrante.getLastRow() === 0) libro.deleteSheet(sobrante);
-
-  invalidarCache_();
+  refrescarCache_();
   avisar_('Listo. La hoja está preparada. Sigue con el paso "Publicar" de la guía de instalación.');
 }
 
-/** Carga los 8 productos y el servicio de ejemplo (solo si la hoja de productos está vacía). */
-function cargarEjemplos() {
-  const respuesta = UrlFetchApp.fetch(URL_CATALOGO + 'datos/demo.json', { muteHttpExceptions: true });
-  if (respuesta.getResponseCode() !== 200) throw new Error('No se pudieron descargar los ejemplos.');
-  const demo = JSON.parse(respuesta.getContentText());
-  if (leerTabla_(HOJA_PRODUCTOS).length) {
-    avisar_('La pestaña Productos ya tiene información; no se cargaron ejemplos.');
-    return;
-  }
-  const ahora = new Date().toISOString();
-  escribirFilas_(HOJA_PRODUCTOS, demo.productos.map((p) => Object.assign({}, p, { actualizado: ahora })));
-  escribirFilas_(HOJA_PAQUETES, demo.paquetes.map((k) => Object.assign({}, k, { actualizado: ahora })));
-  guardarClavesConfig_({ temporada: demo.config.temporada, temporadaTitulo: demo.config.temporadaTitulo });
-  invalidarCache_();
-  avisar_('Se cargaron los productos de ejemplo. Puedes editarlos o borrarlos desde el panel.');
+function prepararPestanas_(libro) {
+  [HOJA_PRODUCTOS, HOJA_PAQUETES].forEach((nombre) => {
+    const hoja = libro.getSheetByName(nombre) || libro.insertSheet(nombre);
+    const columnas = COLUMNAS[nombre];
+    const ancho = Math.max(hoja.getLastColumn(), 1);
+    const actuales = hoja.getRange(1, 1, 1, ancho).getValues()[0].map((t) => String(t).trim()).filter(Boolean);
+    const faltan = columnas.filter((c) => actuales.indexOf(c[1]) < 0 && actuales.indexOf(c[0]) < 0).map((c) => c[1]);
+    if (faltan.length) hoja.getRange(1, actuales.length + 1, 1, faltan.length).setValues([faltan]);
+    hoja.setFrozenRows(1);
+    hoja.getRange(1, 1, 1, actuales.length + faltan.length).setFontWeight('bold').setBackground('#f8d7e2');
+    // Texto plano para que Sheets no convierta IDs ni listas en números o fechas.
+    const claves = clavesDeHoja_(nombre);
+    ['id', 'servicioId', 'ocasiones', 'foto', 'incluye', 'categoria'].forEach((clave) => {
+      const i = claves.indexOf(clave);
+      if (i >= 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
+    });
+  });
 }
 
+function prepararConfig_(libro) {
+  const hoja = libro.getSheetByName(HOJA_CONFIG) || libro.insertSheet(HOJA_CONFIG);
+  if (hoja.getLastRow() === 0) {
+    hoja.getRange(1, 1, 1, 3).setValues([['Clave', 'Valor', 'Nota']]).setFontWeight('bold').setBackground('#f8d7e2');
+    hoja.setFrozenRows(1);
+  }
+  hoja.getRange('B:B').setNumberFormat('@').setWrap(true);
+  const existente = leerConfigCruda_();
+  const faltantes = CONFIG_INICIAL.filter((fila) => !(fila[0] in existente));
+  if (faltantes.length) hoja.getRange(hoja.getLastRow() + 1, 1, faltantes.length, 3).setValues(faltantes);
+  if (!lineas_(leerConfigCruda_().autorizados).length) {
+    guardarClavesConfig_({ autorizados: PropertiesService.getScriptProperties().getProperty('propietario') });
+  }
+}
+
+/**
+ * Agrega los productos y paquetes de ejemplo (Ejemplos.gs) que falten, comparando por ID.
+ * Repetirla no duplica nada.
+ */
+function cargarEjemplos() {
+  verificarDuena_();
+  const ahora = new Date().toISOString();
+  const conFecha = (o) => Object.assign({}, o, { actualizado: ahora });
+  const idsProductos = leerTabla_(HOJA_PRODUCTOS).map((p) => p.id);
+  const productos = EJEMPLOS.productos.filter((p) => idsProductos.indexOf(p.id) < 0); // eslint-disable-line no-undef
+  escribirFilas_(HOJA_PRODUCTOS, productos.map(conFecha));
+  const idsPaquetes = leerTabla_(HOJA_PAQUETES).map((k) => k.id);
+  const paquetes = EJEMPLOS.paquetes.filter((k) => idsPaquetes.indexOf(k.id) < 0); // eslint-disable-line no-undef
+  escribirFilas_(HOJA_PAQUETES, paquetes.map(conFecha));
+  if (!leerConfigCruda_().temporada) {
+    guardarClavesConfig_({ temporada: EJEMPLOS.temporada, temporadaTitulo: EJEMPLOS.temporadaTitulo }); // eslint-disable-line no-undef
+  }
+  refrescarCache_();
+  avisar_(productos.length || paquetes.length
+    ? `Se agregaron ${productos.length} productos y ${paquetes.length} paquetes de ejemplo.`
+    : 'Los ejemplos ya estaban cargados; no se agregó nada.');
+}
+
+/** Aviso que no detiene la ejecución (una alerta esperaría a que alguien toque "Aceptar"). */
 function avisar_(mensaje) {
-  try { SpreadsheetApp.getUi().alert(mensaje); } catch (e) { Logger.log(mensaje); }
+  Logger.log(mensaje);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(mensaje, 'Decorarte', 10); } catch (e) { /* sin hoja abierta */ }
+}
+
+function registrar_(paso) {
+  Logger.log('Instalando: ' + paso);
 }
 
 /* =====================================================================
@@ -216,17 +258,34 @@ function correoActual_() {
   return (Session.getActiveUser().getEmail() || '').trim().toLowerCase();
 }
 
+function propietario_() {
+  return PropertiesService.getScriptProperties().getProperty('propietario') || '';
+}
+
 function estaAutorizado_(correo) {
   if (!correo) return false;
   const lista = lineas_(leerConfigCruda_().autorizados).map((c) => c.toLowerCase());
-  if (!lista.length) {
-    return correo === PropertiesService.getScriptProperties().getProperty('propietario');
-  }
+  if (!lista.length) return correo === propietario_();
   return lista.indexOf(correo) >= 0;
 }
 
+/** Funciones del panel: solo en la implementación "Panel" y solo para correos autorizados. */
 function verificarAcceso_() {
+  if (!esPanel_()) throw new Error('Esta función no está disponible aquí.');
   if (!estaAutorizado_(correoActual_())) throw new Error('No tienes permiso para hacer cambios.');
+}
+
+/**
+ * instalar, cargarEjemplos y publicarCambios: solo la dueña (la cuenta que instaló).
+ * La primera vez, antes de que exista "propietario", solo quien ejecuta el script con su propia cuenta.
+ */
+function verificarDuena_() {
+  const correo = correoActual_();
+  const duena = propietario_();
+  const efectivo = (Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  if (!correo || (duena ? correo !== duena : correo !== efectivo)) {
+    throw new Error('Solo la dueña del catálogo puede ejecutar esta función.');
+  }
 }
 
 /* =====================================================================
@@ -396,6 +455,10 @@ function leerTodo_() {
 
 /* =====================================================================
  *  Datos públicos (API del catálogo) con caché
+ *
+ *  La caché se guarda bajo una clave con la "versión de datos". Cada cambio guardado sube la
+ *  versión y deja lista la caché nueva, así el siguiente cliente recibe los datos al momento.
+ *  Una lectura que empezó antes de un cambio no puede sobrescribir la caché nueva.
  * ===================================================================== */
 
 function construirPublico_() {
@@ -413,30 +476,53 @@ function construirPublico_() {
   };
 }
 
-function jsonPublicoConCache_() {
+function versionDatos_() {
+  return PropertiesService.getScriptProperties().getProperty('versionDatos') || '0';
+}
+
+function nuevaVersionDatos_() {
+  // Siempre mayor que la anterior, aunque dos cambios caigan en el mismo milisegundo.
+  const v = String(Math.max(Date.now(), Number(versionDatos_()) + 1));
+  PropertiesService.getScriptProperties().setProperty('versionDatos', v);
+  return v;
+}
+
+function leerCacheJson_(version) {
   const cache = CacheService.getScriptCache();
-  const partes = Number(cache.get(CLAVE_CACHE + ':n') || 0);
-  if (partes) {
-    const claves = [];
-    for (let i = 0; i < partes; i++) claves.push(CLAVE_CACHE + ':' + i);
-    const valores = cache.getAll(claves);
-    if (claves.every((k) => k in valores)) return claves.map((k) => valores[k]).join('');
-  }
-  const texto = JSON.stringify(construirPublico_());
+  const base = CLAVE_CACHE + ':' + version;
+  const partes = Number(cache.get(base + ':n') || 0);
+  if (!partes) return null;
+  const claves = [];
+  for (let i = 0; i < partes; i++) claves.push(base + ':' + i);
+  const valores = cache.getAll(claves);
+  return claves.every((k) => k in valores) ? claves.map((k) => valores[k]).join('') : null;
+}
+
+function guardarCacheJson_(version, texto) {
   // Cada valor de CacheService admite ~100 KB: se guarda en pedazos.
+  const base = CLAVE_CACHE + ':' + version;
   const TAM = 90000;
   const trozos = {};
   let n = 0;
-  for (let i = 0; i < texto.length; i += TAM) trozos[CLAVE_CACHE + ':' + n++] = texto.slice(i, i + TAM);
-  trozos[CLAVE_CACHE + ':n'] = String(n);
-  try { cache.putAll(trozos, DURACION_CACHE); } catch (e) { /* si no cabe, se sirve sin caché */ }
+  for (let i = 0; i < texto.length; i += TAM) trozos[base + ':' + n++] = texto.slice(i, i + TAM);
+  trozos[base + ':n'] = String(n);
+  try { CacheService.getScriptCache().putAll(trozos, DURACION_CACHE); } catch (e) { /* si no cabe, se sirve sin caché */ }
+}
+
+function jsonPublicoConCache_() {
+  const version = versionDatos_();
+  const guardado = leerCacheJson_(version);
+  if (guardado) return guardado;
+  const texto = JSON.stringify(construirPublico_());
+  // Solo se guarda si nadie cambió los datos mientras se leían.
+  if (versionDatos_() === version) guardarCacheJson_(version, texto);
   return texto;
 }
 
-function invalidarCache_() {
-  const claves = [CLAVE_CACHE + ':n'];
-  for (let i = 0; i < 40; i++) claves.push(CLAVE_CACHE + ':' + i);
-  CacheService.getScriptCache().removeAll(claves);
+/** Después de guardar: versión nueva y caché ya lista con los datos actuales. */
+function refrescarCache_() {
+  const version = nuevaVersionDatos_();
+  guardarCacheJson_(version, JSON.stringify(construirPublico_()));
 }
 
 /* =====================================================================
@@ -449,7 +535,7 @@ function conBloqueo_(fn) {
   try {
     const r = fn();
     SpreadsheetApp.flush();
-    invalidarCache_();
+    refrescarCache_();
     return r;
   } finally {
     candado.releaseLock();
@@ -515,19 +601,6 @@ function reordenar_(grupo, id, posicion) {
   return cambiados;
 }
 
-function esIdDeDrive_(foto) {
-  return /^[\w-]{20,}$/.test(String(foto || ''));
-}
-
-function mandarFotoAPapelera_(foto) {
-  if (!esIdDeDrive_(foto)) return;
-  try { DriveApp.getFileById(foto).setTrashed(true); } catch (e) { /* ya no existe o sin permiso */ }
-}
-
-function fotoEnUso_(foto) {
-  return leerTabla_(HOJA_PRODUCTOS).some((p) => p.foto === foto);
-}
-
 function validarItem_(item, config, esPaquete) {
   const errores = [];
   if (!String(item.nombre || '').trim()) errores.push('Escribe el nombre.');
@@ -539,28 +612,103 @@ function validarItem_(item, config, esPaquete) {
 }
 
 /* =====================================================================
+ *  Fotos en Drive (servicio avanzado de Drive, permiso drive.file)
+ *
+ *  Con drive.file la app solo ve los archivos que ella misma creó con la cuenta de quien la usa.
+ *  Por eso cada cuenta guarda sus fotos en su propia carpeta: la de la dueña queda registrada en
+ *  Configuración; si otra cuenta autorizada sube fotos, van a una carpeta en el Drive de esa persona.
+ * ===================================================================== */
+
+function esIdDeDrive_(foto) {
+  return /^[\w-]{20,}$/.test(String(foto || ''));
+}
+
+/** El archivo si esta cuenta puede verlo y no está en la papelera; si no, null. */
+function archivoDrive_(id) {
+  if (!esIdDeDrive_(id)) return null;
+  try {
+    const f = Drive.Files.get(id, { fields: 'id,trashed' });
+    return f && !f.trashed ? f : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function buscarCarpetaDeLaApp_() {
+  const r = Drive.Files.list({
+    q: `mimeType='${TIPO_CARPETA}' and trashed=false and 'me' in owners and appProperties has { key='decorarte' and value='fotos' }`,
+    fields: 'files(id)',
+    pageSize: 1,
+  });
+  return r.files && r.files.length ? r.files[0].id : '';
+}
+
+/** ID de la carpeta de fotos de quien está usando el panel. La busca antes de crear una nueva. */
+function carpetaFotos_() {
+  const registrada = leerConfigCruda_().carpetaFotos;
+  if (archivoDrive_(registrada)) return registrada;
+
+  const usuario = PropertiesService.getUserProperties();
+  let id = usuario.getProperty('carpetaFotos');
+  if (!archivoDrive_(id)) {
+    id = buscarCarpetaDeLaApp_();
+    if (!id) {
+      id = Drive.Files.create({ name: NOMBRE_CARPETA, mimeType: TIPO_CARPETA, appProperties: { decorarte: 'fotos' } }).id;
+    }
+    usuario.setProperty('carpetaFotos', id);
+  }
+  if (correoActual_() === propietario_()) guardarClavesConfig_({ carpetaFotos: id });
+  return id;
+}
+
+/** Guarda la foto en Drive, visible para cualquiera con el enlace (para que el catálogo la muestre). */
+function subirFotoADrive_(base64, tipo, nombre) {
+  if (!/^image\/(jpeg|png|webp)$/.test(tipo)) throw new Error('El archivo no es una imagen compatible.');
+  const bytes = Utilities.base64Decode(base64);
+  if (bytes.length > 3 * 1024 * 1024) throw new Error('La foto es demasiado grande.');
+  const extension = tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : 'jpg';
+  const nombreArchivo = (crearId_(nombre) || 'foto') + '-' +
+    Utilities.formatDate(new Date(), 'America/Mexico_City', 'yyyyMMdd-HHmmss') + '.' + extension;
+  const archivo = Drive.Files.create(
+    { name: nombreArchivo, parents: [carpetaFotos_()], appProperties: { decorarte: 'foto' } },
+    Utilities.newBlob(bytes, tipo, nombreArchivo),
+  );
+  Drive.Permissions.create({ role: 'reader', type: 'anyone' }, archivo.id);
+  return archivo.id;
+}
+
+function mandarFotoAPapelera_(foto) {
+  if (!esIdDeDrive_(foto)) return;
+  try { Drive.Files.update({ trashed: true }, foto); } catch (e) { /* no es de esta cuenta o ya no existe */ }
+}
+
+/* =====================================================================
  *  Funciones que llama el panel (google.script.run)
  * ===================================================================== */
 
 /** Todo lo que el panel necesita, incluidos los ocultos. */
 function panelCargar() {
   verificarAcceso_();
-  const d = leerTodo_();
-  return {
-    config: d.config,
-    productos: d.productos,
-    paquetes: d.paquetes,
-    correo: correoActual_(),
-    urlCatalogo: URL_CATALOGO,
-  };
+  return panelCargarSinVerificar_();
 }
 
+function panelCargarSinVerificar_() {
+  const d = leerTodo_();
+  return { config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO };
+}
+
+/**
+ * Guarda los datos del producto. La foto NO viaja aquí: se sube aparte con panelSubirFotoProducto,
+ * así guardar es inmediato. Solo con cambiarFoto: true se cambia o se quita la foto.
+ */
 function panelGuardarProducto(datos) {
   verificarAcceso_();
   return conBloqueo_(() => {
     const config = leerConfig_();
     const todos = leerTabla_(HOJA_PRODUCTOS);
     validarItem_(datos, config, false);
+    const anterior = datos.id ? todos.find((p) => p.id === datos.id) : null;
+    if (datos.id && !anterior) throw new Error('Ese producto ya no existe. Recarga el panel.');
     const ocasionesValidas = config.ocasiones.map((o) => o.id);
     const producto = {
       id: datos.id || nuevoId_('p', todos),
@@ -570,13 +718,11 @@ function panelGuardarProducto(datos) {
       ocasiones: [].concat(datos.ocasiones || []).filter((o) => ocasionesValidas.indexOf(o) >= 0),
       tipoPrecio: datos.tipoPrecio,
       precio: aNumero_(datos.precio),
-      foto: String(datos.foto || '').trim(),
+      foto: datos.cambiarFoto ? String(datos.foto || '').trim() : (anterior ? anterior.foto : ''),
       disponible: datos.disponible !== false,
       destacado: !!datos.destacado,
       actualizado: new Date().toISOString(),
     };
-    const anterior = datos.id ? todos.find((p) => p.id === datos.id) : null;
-    if (datos.id && !anterior) throw new Error('Ese producto ya no existe. Recarga el panel.');
 
     const grupo = todos.filter((p) => p.categoria === producto.categoria && p.id !== producto.id);
     if (anterior) {
@@ -596,6 +742,29 @@ function panelGuardarProducto(datos) {
       escribirOrden_(HOJA_PRODUCTOS, reordenar_(actualizados, producto.id, posicion - 1));
     }
     return Object.assign(panelCargarSinVerificar_(), { guardadoId: producto.id });
+  });
+}
+
+/**
+ * Sube la foto (ya reducida en el celular) y se la asigna al producto en una sola llamada.
+ * La subida va fuera del candado para no detener otros cambios mientras tanto.
+ */
+function panelSubirFotoProducto(id, base64, tipo, nombre) {
+  verificarAcceso_();
+  const fotoId = subirFotoADrive_(base64, tipo, nombre);
+  return conBloqueo_(() => {
+    const todos = leerTabla_(HOJA_PRODUCTOS);
+    const p = todos.find((x) => x.id === id);
+    if (!p) {
+      mandarFotoAPapelera_(fotoId);
+      throw new Error('Ese producto ya no existe; la foto no se guardó.');
+    }
+    const anterior = p.foto;
+    p.foto = fotoId;
+    p.actualizado = new Date().toISOString();
+    actualizarFila_(HOJA_PRODUCTOS, p._fila, p);
+    if (anterior && anterior !== fotoId && !todos.some((x) => x.id !== id && x.foto === anterior)) mandarFotoAPapelera_(anterior);
+    return Object.assign(panelCargarSinVerificar_(), { fotoId: fotoId });
   });
 }
 
@@ -739,7 +908,8 @@ function panelGuardarConfig(datos) {
         .map((o) => ({ id: o.id || crearId_(o.nombre), emoji: String(o.emoji || '').trim(), nombre: String(o.nombre || '').trim() }))
         .filter((o) => o.id && o.nombre);
       valores.ocasiones = listaATexto_(ocs, ['id', 'emoji', 'nombre']);
-      if (valores.temporada && !ocs.some((o) => o.id === valores.temporada)) valores.temporada = '';
+      const temporada = 'temporada' in valores ? valores.temporada : leerConfigCruda_().temporada;
+      if (temporada && !ocs.some((o) => o.id === temporada)) valores.temporada = '';
     }
     if (Array.isArray(datos.autorizados)) {
       const correos = datos.autorizados.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
@@ -752,45 +922,6 @@ function panelGuardarConfig(datos) {
     guardarClavesConfig_(valores);
     return panelCargarSinVerificar_();
   });
-}
-
-/**
- * Recibe una foto ya reducida por el celular (JPEG en base64), la guarda en la carpeta
- * de fotos y la deja visible para el catálogo. Devuelve el ID del archivo.
- */
-function panelSubirFoto(base64, tipo, nombre) {
-  verificarAcceso_();
-  if (!/^image\/(jpeg|png|webp)$/.test(tipo)) throw new Error('El archivo no es una imagen compatible.');
-  const bytes = Utilities.base64Decode(base64);
-  if (bytes.length > 3 * 1024 * 1024) throw new Error('La foto es demasiado grande.');
-  const extension = tipo === 'image/png' ? 'png' : tipo === 'image/webp' ? 'webp' : 'jpg';
-  const nombreArchivo = (crearId_(nombre) || 'foto') + '-' + Utilities.formatDate(new Date(), 'America/Mexico_City', 'yyyyMMdd-HHmmss') + '.' + extension;
-  const archivo = carpetaFotos_().createFile(Utilities.newBlob(bytes, tipo, nombreArchivo));
-  archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return archivo.getId();
-}
-
-/** Borra una foto subida que al final no se usó (por ejemplo, si se canceló el formulario). */
-function panelDescartarFoto(id) {
-  verificarAcceso_();
-  if (esIdDeDrive_(id) && !fotoEnUso_(id)) mandarFotoAPapelera_(id);
-  return true;
-}
-
-function panelCargarSinVerificar_() {
-  const d = leerTodo_();
-  return { config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO };
-}
-
-function carpetaFotos_() {
-  const id = leerConfigCruda_().carpetaFotos;
-  if (id) {
-    try { return DriveApp.getFolderById(id); } catch (e) { /* se creará otra */ }
-  }
-  const carpeta = DriveApp.createFolder(NOMBRE_CARPETA);
-  try { carpeta.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) { /* se comparte cada foto */ }
-  guardarClavesConfig_({ carpetaFotos: carpeta.getId() });
-  return carpeta;
 }
 
 function escaparHtml_(s) {

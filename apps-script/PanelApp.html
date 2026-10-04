@@ -7,7 +7,8 @@ var S = {
   filtro: 'todos',      // todos | <idCategoria> | ocultos
   busqueda: '',
   form: null,           // copia en edición
-  fotoNueva: null,      // { base64, tipo, url } foto reducida pendiente de subir
+  fotoNueva: null,      // { base64, tipo, url } foto reducida elegida en el formulario
+  quitarFoto: false,    // se tocó "Quitar la foto"
   cambios: false,       // hay cambios sin guardar en el formulario
 };
 
@@ -116,6 +117,169 @@ function confirmar(titulo, texto, textoSi) {
   });
 }
 
+/* ---------------- Fotos en segundo plano ----------------
+   El producto se guarda al momento; la foto se sube después, una a la vez.
+   Mientras sube, la tarjeta dice "Subiendo foto…"; si falla, ofrece "Reintentar".
+   Las fotos pendientes se guardan en el teléfono (IndexedDB): si se cierra el panel,
+   se reanudan la próxima vez que se abra. */
+
+var almacen = (function () {
+  var conexion = null;
+  function abrir() {
+    if (!conexion) {
+      conexion = new Promise(function (resolver, rechazar) {
+        if (!window.indexedDB) return rechazar(new Error('sin IndexedDB'));
+        var r = indexedDB.open('decorarte-panel', 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore('fotos', { keyPath: 'productoId' }); };
+        r.onsuccess = function () { resolver(r.result); };
+        r.onerror = function () { rechazar(r.error); };
+      });
+    }
+    return conexion;
+  }
+  function operar(modo, fn) {
+    return abrir().then(function (db) {
+      return new Promise(function (resolver, rechazar) {
+        var t = db.transaction('fotos', modo);
+        var pedido = fn(t.objectStore('fotos'));
+        t.oncomplete = function () { resolver(pedido && pedido.result); };
+        t.onerror = function () { rechazar(t.error); };
+      });
+    });
+  }
+  return {
+    guardar: function (x) { return operar('readwrite', function (s) { return s.put(x); }).catch(function () {}); },
+    borrar: function (id) { return operar('readwrite', function (s) { return s.delete(id); }).catch(function () {}); },
+    todas: function () { return operar('readonly', function (s) { return s.getAll(); }).catch(function () { return []; }); },
+  };
+})();
+
+var subidas = {};     // productoId -> { productoId, base64, tipo, nombre, url, estado: 'pendiente'|'subiendo'|'error', siguiente }
+var subiendoAhora = false;
+
+function subidaDe(id) {
+  var s = subidas[id];
+  return s ? (s.siguiente || s) : null;
+}
+function haySubidasPendientes() {
+  return Object.keys(subidas).some(function (id) { return subidas[id].estado !== 'error'; });
+}
+
+function base64AUrl(base64, tipo) {
+  var binario = atob(base64);
+  var bytes = new Uint8Array(binario.length);
+  for (var i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: tipo }));
+}
+
+function encolarFoto(productoId, foto, nombre) {
+  var item = { productoId: productoId, base64: foto.base64, tipo: foto.tipo, nombre: nombre, url: foto.url, estado: 'pendiente' };
+  var actual = subidas[productoId];
+  if (actual && actual.estado === 'subiendo') {
+    actual.siguiente = item; // la que ya va subiendo termina; después sube esta (gana la última)
+  } else {
+    if (actual && actual.url) URL.revokeObjectURL(actual.url);
+    subidas[productoId] = item;
+  }
+  almacen.guardar({ productoId: productoId, base64: foto.base64, tipo: foto.tipo, nombre: nombre, creado: Date.now() });
+  procesarSubidas();
+}
+
+function cancelarSubida(productoId) {
+  var s = subidas[productoId];
+  if (!s) return true;
+  if (s.estado === 'subiendo') return false;
+  if (s.url) URL.revokeObjectURL(s.url);
+  delete subidas[productoId];
+  almacen.borrar(productoId);
+  return true;
+}
+
+async function procesarSubidas() {
+  if (subiendoAhora) return;
+  var id = Object.keys(subidas).filter(function (k) { return subidas[k].estado === 'pendiente'; })[0];
+  if (!id) return;
+  var item = subidas[id];
+  subiendoAhora = true;
+  item.estado = 'subiendo';
+  mostrarSubidas();
+  try {
+    var datos = await llamar('panelSubirFotoProducto', item.productoId, item.base64, item.tipo, item.nombre);
+    S.datos = datos;
+    if (item.siguiente) {
+      subidas[id] = item.siguiente;
+    } else {
+      delete subidas[id];
+      almacen.borrar(id);
+      if (S.vista !== 'producto') avisar('Foto de "' + item.nombre + '" lista en el catálogo');
+    }
+  } catch (err) {
+    if (item.siguiente) {
+      subidas[id] = item.siguiente;
+    } else if (/ya no existe/.test(err.message)) {
+      delete subidas[id];
+      almacen.borrar(id);
+    } else {
+      item.estado = 'error';
+      item.error = err.message;
+      avisar('No se pudo subir la foto de "' + item.nombre + '". Revisa tu señal y toca "Reintentar".', 'error');
+    }
+  } finally {
+    subiendoAhora = false;
+    mostrarSubidas();
+    procesarSubidas();
+  }
+}
+
+function reintentarSubida(id) {
+  var s = subidas[id];
+  if (s && s.estado === 'error') { s.estado = 'pendiente'; procesarSubidas(); }
+}
+
+/** Actualiza en pantalla el estado de las fotos sin redibujar formularios (no se pierde lo que se escribe). */
+function mostrarSubidas() {
+  if (S.vista === 'productos' && $('resultados')) renderResultados();
+  var estado = $('foto-estado-subida');
+  if (estado && S.form) {
+    var s = subidaDe(S.form.id);
+    estado.hidden = !s;
+    if (s) {
+      estado.className = 'foto-estado' + (s.estado === 'error' ? ' error' : '');
+      estado.innerHTML = s.estado === 'error'
+        ? 'No se subió la foto. <button type="button" class="enlace" data-accion="reintentar-foto" data-id="' + esc(S.form.id) + '">Reintentar</button>'
+        : '<span class="girador-chico"></span> Subiendo foto…';
+    }
+  }
+}
+
+function estadoSubidaHtml(id) {
+  var s = subidaDe(id);
+  if (!s) return '';
+  if (s.estado === 'error') {
+    return '<div class="item-subida error" role="status">No se subió la foto.' +
+      '<button type="button" data-accion="reintentar-foto" data-id="' + esc(id) + '">Reintentar</button></div>';
+  }
+  return '<div class="item-subida" role="status"><span class="girador-chico"></span>' +
+    (s.estado === 'subiendo' ? 'Subiendo foto…' : 'Foto en espera…') + '</div>';
+}
+
+/** Al abrir el panel: reanuda las fotos que quedaron pendientes en el teléfono. */
+async function reanudarSubidas() {
+  var guardadas = await almacen.todas();
+  (guardadas || []).forEach(function (g) {
+    var existe = S.datos.productos.some(function (p) { return p.id === g.productoId; });
+    if (!existe) { almacen.borrar(g.productoId); return; }
+    if (subidas[g.productoId]) return;
+    subidas[g.productoId] = { productoId: g.productoId, base64: g.base64, tipo: g.tipo, nombre: g.nombre, url: base64AUrl(g.base64, g.tipo), estado: 'pendiente' };
+  });
+  mostrarSubidas();
+  procesarSubidas();
+}
+
+window.addEventListener('online', function () {
+  Object.keys(subidas).forEach(reintentarSubida);
+});
+
 /* ---------------- Navegación ---------------- */
 
 function categoria(id) { return S.datos.config.categorias.filter(function (c) { return c.id === id; })[0]; }
@@ -127,6 +291,7 @@ async function ir(destino) {
   S.cambios = false;
   S.form = null;
   S.fotoNueva = null;
+  S.quitarFoto = false;
   S.vista = destino;
   var seccion = destino === 'producto' ? 'productos' : destino === 'paquete' ? 'paquetes' : destino;
   Array.prototype.forEach.call(document.querySelectorAll('[data-ir]'), function (b) {
@@ -205,7 +370,7 @@ function tarjetaProducto(p, grupo) {
   var ocasiones = S.datos.config.ocasiones.filter(function (o) { return p.ocasiones.indexOf(o.id) >= 0; });
   return '<article class="item' + (p.disponible ? '' : ' oculto') + '">' +
     '<button type="button" class="item-principal" data-accion="editar-producto" data-id="' + esc(p.id) + '" aria-label="Editar ' + esc(p.nombre) + '">' +
-      imgFoto(p.foto, 'item-foto', 200) +
+      (subidaDe(p.id) ? '<img class="item-foto" src="' + esc(subidaDe(p.id).url) + '" alt="">' : imgFoto(p.foto, 'item-foto', 200)) +
       '<div class="item-info"><p class="item-nombre">' + esc(p.nombre) + '</p>' +
       '<div class="item-precio' + (precio === 'Pregunta por precio' ? ' consultar' : '') + '">' + esc(precio) + '</div>' +
       '<div class="etiquetas">' +
@@ -216,6 +381,7 @@ function tarjetaProducto(p, grupo) {
       '</div></div>' +
       '<svg class="ico" style="width:24px;height:24px;color:var(--texto-suave)" aria-hidden="true"><use href="#i-lapiz"/></svg>' +
     '</button>' +
+    estadoSubidaHtml(p.id) +
     '<div class="item-acciones">' +
       '<button type="button" data-accion="destacar" data-id="' + esc(p.id) + '" class="' + (p.destacado ? 'activo' : '') + '">' +
         ico(p.destacado ? 'estrella' : 'estrella-vacia') + (p.destacado ? 'Destacado' : 'Destacar') + '</button>' +
@@ -239,6 +405,7 @@ function abrirProducto(id) {
   S.form.posicion = p ? grupo.indexOf(p) + 1 : grupo.length + 1;
   S.posicionOriginal = S.form.posicion;
   S.fotoNueva = null;
+  S.quitarFoto = false;
   S.cambios = false;
   S.vista = 'producto';
   render();
@@ -250,7 +417,8 @@ function renderFormProducto() {
   var c = S.datos.config;
   var grupo = S.datos.productos.filter(function (x) { return x.categoria === f.categoria && x.id !== f.id; });
   var totalLugares = grupo.length + 1;
-  var fotoSrc = S.fotoNueva ? S.fotoNueva.url : urlFoto(f.foto, 600);
+  var pendiente = !S.fotoNueva && !S.quitarFoto && f.id ? subidaDe(f.id) : null;
+  var fotoSrc = S.fotoNueva ? S.fotoNueva.url : S.quitarFoto ? '' : pendiente ? pendiente.url : urlFoto(f.foto, 600);
 
   vista.innerHTML =
     '<div class="barra-form"><button type="button" class="atras" data-accion="volver">' + ico('atras') + 'Volver</button></div>' +
@@ -261,6 +429,7 @@ function renderFormProducto() {
         (fotoSrc ? '<img src="' + esc(fotoSrc) + '" alt="Foto del producto">' : '<img class="sin-foto" src="' + esc(PANEL.urlLogo) + '" alt="">') +
         (S.fotoNueva ? '<div class="foto-estado">Foto lista · ' + S.fotoNueva.ancho + '×' + S.fotoNueva.alto + ' · ' + Math.round(S.fotoNueva.bytes / 1024) + ' KB</div>' : '') +
         (!fotoSrc ? '<div class="foto-estado">Sin foto: en el catálogo se verá el logo</div>' : '') +
+        '<div class="foto-estado" id="foto-estado-subida" role="status" hidden></div>' +
       '</div>' +
       '<div class="foto-botones">' +
         '<button type="button" class="boton boton-suave" data-accion="foto-camara">' + ico('camara') + 'Tomar foto</button>' +
@@ -311,6 +480,7 @@ function renderFormProducto() {
 
     '<div class="guardar-fijo"><button type="button" class="boton boton-principal" data-accion="guardar-producto">' + ico('check') + 'Guardar</button></div>' +
     (f.id ? '<div class="zona-peligro"><button type="button" class="boton boton-peligro-borde" data-accion="eliminar-producto">' + ico('basura') + 'Eliminar producto</button></div>' : '');
+  if (pendiente) mostrarSubidas();
 }
 
 function interruptor(campo, titulo, texto, valor) {
@@ -334,23 +504,20 @@ async function guardarProducto() {
     var campo = $('f-precio'); if (campo) { campo.classList.add('error'); campo.focus(); }
     return;
   }
-  var fotoSubida = '';
   try {
-    if (S.fotoNueva) {
-      ocupado('Subiendo foto…');
-      fotoSubida = await llamar('panelSubirFoto', S.fotoNueva.base64, S.fotoNueva.tipo, f.nombre);
-      f.foto = fotoSubida;
-    }
     var envio = Object.assign({}, f, { posicion: f.posicion !== S.posicionOriginal ? f.posicion : null });
-    await accion('Guardando…', 'panelGuardarProducto', envio);
+    // La foto no viaja aquí: solo se avisa si se quitó. La nueva se sube en segundo plano.
+    if (S.quitarFoto && !S.fotoNueva) { envio.cambiarFoto = true; envio.foto = ''; }
+    var datos = await accion('Guardando…', 'panelGuardarProducto', envio);
+    var foto = S.fotoNueva;
+    S.fotoNueva = null;
+    if (foto) encolarFoto(datos.guardadoId, foto, f.nombre);
     S.cambios = false;
     var nuevo = !f.id;
     await ir('productos');
-    avisar(nuevo ? '¡Producto agregado al catálogo!' : 'Cambios guardados');
+    avisar((nuevo ? '¡Producto agregado al catálogo!' : 'Cambios guardados') + (foto ? ' Subiendo la foto…' : ''));
   } catch (err) {
     ocupado('');
-    if (fotoSubida) llamar('panelDescartarFoto', fotoSubida).catch(function () {});
-    if (fotoSubida) f.foto = '';
     avisar(err.message, 'error');
   }
 }
@@ -362,6 +529,7 @@ async function eliminarProducto() {
     'Se borrará del catálogo' + (paquetes ? ' junto con sus ' + paquetes + ' paquetes' : '') + '. Si solo quieres quitarlo un tiempo, mejor ocúltalo.');
   if (!ok) return;
   try {
+    cancelarSubida(f.id);
     await accion('Eliminando…', 'panelEliminarProducto', f.id);
     S.cambios = false;
     await ir('productos');
@@ -378,6 +546,7 @@ async function fotoElegida(archivo) {
     var r = await reducirImagen(archivo);
     if (S.fotoNueva && S.fotoNueva.url) URL.revokeObjectURL(S.fotoNueva.url);
     S.fotoNueva = { base64: r.base64, tipo: r.tipo, ancho: r.ancho, alto: r.alto, bytes: r.bytes, url: URL.createObjectURL(r.blob) };
+    S.quitarFoto = false;
     S.cambios = true;
     render();
   } catch (err) {
@@ -543,7 +712,9 @@ function renderAjustes() {
           '<input class="entrada emoji" data-lista="ocasiones" data-i="' + i + '" data-prop="emoji" value="' + esc(o.emoji) + '" aria-label="Emoji" maxlength="4">' +
           '<input class="entrada" data-lista="ocasiones" data-i="' + i + '" data-prop="nombre" value="' + esc(o.nombre) + '" aria-label="Nombre de la ocasión" placeholder="Nombre">' +
           '<button type="button" class="boton-icono" data-accion="mover-fila" data-lista="ocasiones" data-i="' + i + '" aria-label="Subir"' + (i === 0 ? ' disabled' : '') + '>' + ico('arriba') + '</button>' +
-          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="ocasiones" data-i="' + i + '" aria-label="Quitar">' + ico('basura') + '</button></div>';
+          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="ocasiones" data-i="' + i + '" aria-label="Quitar">' + ico('basura') + '</button></div>' +
+          (productosDeOcasion(o.id || crearId(o.nombre)) ? '' :
+            '<p class="nota-fila">Aún sin productos: aparecerá en el catálogo cuando tenga al menos uno visible.</p>');
       }).join('') +
       '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="ocasiones">+ Agregar ocasión</button>' +
       '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar ocasiones</button>' +
@@ -578,6 +749,11 @@ function renderAjustes() {
       '<li>Android: menú <b>⋮</b> → <b>Agregar a la pantalla principal</b>. iPhone: botón <b>Compartir</b> → <b>Agregar a inicio</b>.</li>' +
       '<li>Te queda un ícono con tu logo que abre este panel.</li></ol>' +
     '</div>';
+}
+
+/** Productos visibles con esa ocasión (el catálogo no muestra ocasiones sin productos). */
+function productosDeOcasion(id) {
+  return S.datos.productos.filter(function (p) { return p.disponible && p.ocasiones.indexOf(id) >= 0; }).length;
 }
 
 function leerAjustesContacto() {
@@ -646,7 +822,9 @@ document.addEventListener('click', async function (e) {
       case 'foto-camara': return $('foto-camara').click();
       case 'foto-galeria': return $('foto-galeria').click();
       case 'foto-quitar':
-        S.fotoNueva = null; S.form.foto = ''; S.cambios = true; return render();
+        if (S.form.id && !cancelarSubida(S.form.id)) { avisar('Espera a que termine de subir la foto y vuelve a intentarlo.', 'error'); return; }
+        S.fotoNueva = null; S.quitarFoto = true; S.cambios = true; return render();
+      case 'reintentar-foto': return reintentarSubida(id);
       case 'destacar':
         await accion(p.destacado ? 'Quitando estrella…' : 'Destacando…', 'panelCambiarProducto', id, 'destacado', !p.destacado);
         render(); return avisar(p.destacado ? 'Ya no está destacado' : '★ Destacado');
@@ -750,7 +928,9 @@ document.addEventListener('change', function (e) {
   if (S.form && el.type === 'checkbox' && el.dataset.campo) { S.form[el.dataset.campo] = el.checked; S.cambios = true; }
 });
 
-window.addEventListener('beforeunload', function (e) { if (S.cambios) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', function (e) {
+  if (S.cambios || haySubidasPendientes()) { e.preventDefault(); e.returnValue = ''; }
+});
 
 /* ---------------- Inicio ---------------- */
 
@@ -758,6 +938,7 @@ window.addEventListener('beforeunload', function (e) { if (S.cambios) { e.preven
   try {
     S.datos = await llamar('panelCargar');
     render();
+    reanudarSubidas();
   } catch (err) {
     vista.innerHTML = '<div class="vacio"><strong>No se pudo cargar el panel</strong>' + esc(err.message) +
       '<div style="height:14px"></div><button type="button" class="boton boton-principal" onclick="location.reload()">Intentar de nuevo</button></div>';

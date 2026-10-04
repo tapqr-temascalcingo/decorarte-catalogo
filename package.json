@@ -8,7 +8,8 @@
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:navegador": "playwright test --project=celular --project=iphone",
     "test:todo": "npm test && npm run test:navegador",
-    "capturas": "playwright test --project=capturas"
+    "capturas": "playwright test --project=capturas",
+    "ejemplos": "node tests/generar-ejemplos.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"

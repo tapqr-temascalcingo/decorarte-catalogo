@@ -28,10 +28,10 @@ En este repositorio no hay llaves ni datos privados. Solo quedan las URL públic
 | `js/config.js` | URL de la API (vacía = demo) y del panel |
 | `datos/demo.json` | 8 productos y 1 servicio con 3 paquetes de ejemplo, en el mismo formato que la API |
 | `panel/` | Acceso directo instalable (manifest e ícono) que abre el panel |
-| `apps-script/` | `Codigo.gs` (API y funciones del panel) y los HTML del panel |
+| `apps-script/` | `Codigo.gs` (API y funciones del panel), `Implementacion.gs` ('api' o 'panel'), `Ejemplos.gs` y los HTML del panel |
 | `tests/unit/` | Pruebas con `node:test` de la lógica y de `Codigo.gs` sobre un simulador de Google |
 | `tests/navegador/` | Pruebas con Playwright del catálogo, el panel y la reducción de fotos, más las capturas del manual |
-| `tests/simulador/` | Simulador en memoria de SpreadsheetApp, DriveApp, CacheService, etc. |
+| `tests/simulador/` | Simulador en memoria de SpreadsheetApp, Drive (servicio avanzado, reglas de `drive.file`), CacheService, etc. |
 
 ## Desarrollo
 

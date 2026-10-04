@@ -30,8 +30,24 @@
       background: #c8457f; color: #fff; font-weight: 600; font-size: 18px; text-decoration: none;
       box-shadow: 0 8px 20px rgba(200, 69, 127, .3); margin: 18px 0 10px;
     }
+    .boton-suave {
+      display: flex; align-items: center; justify-content: center; min-height: 52px; border-radius: 14px;
+      background: #fbe4ec; color: #4a3a40; font-weight: 600; font-size: 16px; text-decoration: none; margin-top: 8px;
+    }
     .pasos { text-align: left; background: #fff; border-radius: 18px; padding: 16px 16px 16px 36px; box-shadow: 0 6px 18px rgba(214, 150, 170, .2); font-size: 15.5px; }
     .pasos li { margin-bottom: 6px; }
+    .ayuda {
+      text-align: left; background: #fff; border-radius: 18px; margin: 14px 0; padding: 4px 18px 16px;
+      box-shadow: 0 6px 18px rgba(214, 150, 170, .2); font-size: 15.5px;
+    }
+    .ayuda[open] { border: 2px solid #f0aecb; }
+    .ayuda summary { cursor: pointer; font-weight: 600; padding: 14px 0 6px; list-style-position: inside; }
+    .ayuda h2 { font-family: 'Playfair Display', serif; font-size: 18px; margin: 12px 0 6px; }
+    .ayuda ol { padding-left: 22px; margin: 0 0 10px; }
+    .ayuda li { margin-bottom: 6px; }
+    .ayuda p { color: #4a3a40; margin: 0 0 10px; }
+    .ayuda .nota { font-size: 14px; color: #7d646c; }
+    .cuentas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     small { color: #a88a93; }
   </style>
 </head>
@@ -43,31 +59,91 @@
     <a class="boton" id="abrir" href="#" hidden>Abrir el panel</a>
     <ol class="pasos" id="instalar" hidden>
       <li><b>Android (Chrome):</b> menú <b>⋮</b> → <b>Agregar a la pantalla principal</b> o <b>Instalar app</b>.</li>
-      <li><b>iPhone (Safari):</b> botón <b>Compartir</b> → <b>Agregar a inicio</b>.</li>
+      <li><b>iPhone:</b> botón <b>Compartir</b> → <b>Agregar a inicio</b> (o <b>Agregar a pantalla de inicio</b>).</li>
       <li>Te queda un ícono con tu logo. Tócalo para administrar tu catálogo.</li>
     </ol>
+
+    <details class="ayuda" id="ayuda" hidden>
+      <summary>¿Te sale «No se pudo abrir el archivo»?</summary>
+      <p>Pasa cuando el navegador tiene abiertas <b>varias cuentas de Google</b> (por ejemplo, tu cuenta personal y la del negocio). Google no sabe con cuál abrir el panel.</p>
+
+      <h2>Lo que mejor funciona</h2>
+      <p>Usa un navegador <b>solo para el catálogo</b>, donde únicamente esté la cuenta del negocio. Por ejemplo, si en Safari tienes tu cuenta personal, usa <b>Chrome</b> para el panel.</p>
+      <ol>
+        <li>Instala <b>Google Chrome</b> desde la App Store (si no lo tienes).</li>
+        <li>Abre Chrome y entra a <b>google.com</b>. Inicia sesión <b>solo</b> con la cuenta del negocio. No agregues tu cuenta personal en Chrome.</li>
+        <li>En Chrome abre esta misma página. <span id="en-chrome-texto">Puedes usar el botón de abajo.</span></li>
+        <li>Toca el botón <b>Compartir</b> de Chrome → <b>Agregar a pantalla de inicio</b>. Usa ese ícono nuevo de ahora en adelante.</li>
+      </ol>
+      <a class="boton-suave" id="abrir-chrome" href="#" hidden>Abrir esta página en Chrome</a>
+
+      <h2>Otra cosa que puedes probar</h2>
+      <p class="nota">Estos botones abren el panel pidiéndole a Google una cuenta en específico. A veces funcionan y a veces no; si ninguno sirve, usa la opción de arriba.</p>
+      <div class="cuentas">
+        <a class="boton-suave" data-cuenta="0" href="#">Cuenta 1</a>
+        <a class="boton-suave" data-cuenta="1" href="#">Cuenta 2</a>
+        <a class="boton-suave" data-cuenta="2" href="#">Cuenta 3</a>
+      </div>
+    </details>
+
     <p><small>Solo pueden entrar los correos autorizados.</small></p>
   </main>
   <script type="module">
     import { CONFIG } from '../js/config.js';
-    const estado = document.getElementById('estado');
-    const abrir = document.getElementById('abrir');
-    const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+    const $ = (id) => document.getElementById(id);
+    const estado = $('estado');
+    const ayuda = $('ayuda');
+    const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const esIphone = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const enChrome = /CriOS/.test(navigator.userAgent);
+    const CLAVE = 'decorarte:panel:intento';
+    const RECIENTE = 3 * 60 * 1000; // si vuelves aquí antes de 3 min, probablemente no pudiste entrar
+
+    function leerIntento() { try { return Number(localStorage.getItem(CLAVE) || 0); } catch { return 0; } }
+    function marcarIntento() { try { localStorage.setItem(CLAVE, String(Date.now())); } catch { /* sin almacenamiento */ } }
+
+    /** Misma URL del panel pidiendo la cuenta N de las que hay abiertas: /macros/u/N/s/… */
+    const conCuenta = (url, n) => url.replace('/macros/s/', `/macros/u/${n}/s/`);
 
     if (!CONFIG.panel) {
       estado.textContent = 'El panel todavía no está conectado. Sigue el paso 7 de INSTALACION.md.';
     } else {
-      abrir.href = CONFIG.panel;
-      abrir.hidden = false;
-      if (instalado) {
+      $('abrir').href = CONFIG.panel;
+      $('abrir').hidden = false;
+      ayuda.hidden = false;
+      document.querySelectorAll('[data-cuenta]').forEach((a) => { a.href = conCuenta(CONFIG.panel, a.dataset.cuenta); });
+      document.querySelectorAll('#abrir, [data-cuenta]').forEach((a) => a.addEventListener('click', marcarIntento));
+
+      if (esIphone && !enChrome) {
+        $('abrir-chrome').hidden = false;
+        $('abrir-chrome').href = 'googlechromes://' + location.host + location.pathname;
+      } else if (enChrome) {
+        $('en-chrome-texto').textContent = 'Ya estás en Chrome.';
+      }
+
+      const volvioPronto = Date.now() - leerIntento() < RECIENTE;
+      if (new URLSearchParams(location.search).has('ayuda') || (instalado && volvioPronto)) {
+        // Probablemente Google mostró «No se pudo abrir el archivo»: en vez de reintentar solo, ayudamos.
+        estado.textContent = '¿No pudiste entrar? Revisa los pasos de abajo.';
+        ayuda.open = true;
+      } else if (instalado) {
         // Abierto desde el ícono: entra directo.
+        marcarIntento();
         location.replace(CONFIG.panel);
       } else {
         // Abierto desde el navegador: primero se ofrece agregarlo a la pantalla de inicio.
         estado.textContent = 'Agrega este acceso a tu pantalla de inicio para entrar con un toque.';
-        document.getElementById('instalar').hidden = false;
+        $('instalar').hidden = false;
       }
     }
+
+    // Al regresar a esta página (botón atrás o al cerrar la ventana de Google) se muestra la ayuda.
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted && CONFIG.panel && Date.now() - leerIntento() < RECIENTE) {
+        estado.textContent = '¿No pudiste entrar? Revisa los pasos de abajo.';
+        ayuda.open = true;
+      }
+    });
   </script>
 </body>
 </html>
