@@ -74,7 +74,7 @@ test('panel', async ({ page }) => {
   await guardar(page.locator('.item').nth(3), '11-panel-tarjeta');
 
   // Nuevo producto con foto
-  await page.click('[data-accion="nuevo-producto"]');
+  await page.click('#nav-agregar');
   await page.setInputFiles('#foto-galeria', { name: 'IMG_2041.png', mimeType: 'image/png', buffer: await fotoBonita(page, 'rosas.svg') });
   await expect(page.locator('.foto-estado').first()).toContainText('1080×1080');
   await page.fill('#f-nombre', 'Caja de rosas rojas');

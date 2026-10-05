@@ -43,7 +43,7 @@ test.describe('fotos en segundo plano', () => {
     await expect(page.locator('#foto-estado-subida')).toBeHidden({ timeout: 8000 });
     await expect(page.locator('#f-nombre')).toHaveValue('Oso grande con chocolates'); // no se borró lo escrito
     await page.click('[data-accion="guardar-producto"]');
-    await expect(page.locator('#aviso')).toContainText('Cambios guardados');
+    await expect(page.locator('#f-nombre')).toHaveCount(0); // volvió a la lista: el guardado terminó
     const p3 = await productoPublico(page, 'p3');
     expect(p3.nombre).toBe('Oso grande con chocolates');
     expect(p3.foto).toMatch(/^1Simulado/); // guardar el formulario no pisó la foto nueva

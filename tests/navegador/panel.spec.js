@@ -68,7 +68,7 @@ test.describe('panel', () => {
   });
 
   test('agregar producto con foto, varias ocasiones y precio "desde"', async ({ page }) => {
-    await page.click('[data-accion="nuevo-producto"]');
+    await page.click('#nav-agregar');
     await expect(page.locator('h1')).toHaveText('Nuevo producto');
 
     const foto = await fotoDePrueba(page, 4000, 3000);
@@ -110,7 +110,7 @@ test.describe('panel', () => {
   });
 
   test('pide nombre y precio antes de guardar', async ({ page }) => {
-    await page.click('[data-accion="nuevo-producto"]');
+    await page.click('#nav-agregar');
     await page.click('[data-accion="guardar-producto"]');
     await expect(page.locator('#aviso')).toContainText('nombre');
     await page.fill('#f-nombre', 'Algo');

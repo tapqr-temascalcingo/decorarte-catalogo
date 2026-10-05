@@ -15,9 +15,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://lh3.googleusercontent.com">
-  <link rel="dns-prefetch" href="https://script.google.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600&display=swap">
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com">
+  <!-- Las letras de la marca cargan sin detener la página: el texto se ve de inmediato y cambia a su letra al llegar -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@700&family=Playfair+Display:wght@600;700&family=Poppins:wght@400;500;600&display=swap"></noscript>
   <link rel="stylesheet" href="css/estilos.css">
+  <link rel="modulepreload" href="js/config.js">
   <link rel="modulepreload" href="js/logica.js">
   <script type="module" src="js/app.js"></script>
 </head>
@@ -53,6 +57,10 @@
       <input id="buscar" type="search" placeholder="Buscar regalo, ocasión o servicio…" autocomplete="off" enterkeyhint="search" aria-label="Buscar en el catálogo">
       <button type="button" id="limpiar-busqueda" class="limpiar" aria-label="Borrar búsqueda" hidden><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
     </label>
+  </div>
+
+  <!-- Lo único que se queda fijo arriba al desplazarse: una fila con los filtros de ocasión -->
+  <div class="barra-ocasiones" id="barra-ocasiones">
     <div class="ocasiones" id="ocasiones" aria-label="Filtrar por ocasión"></div>
   </div>
 

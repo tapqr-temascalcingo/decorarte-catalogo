@@ -92,6 +92,7 @@ async function accion(textoEspera, funcion) {
   var args = Array.prototype.slice.call(arguments, 2);
   ocupado(textoEspera);
   try {
+    await esperarRapidas();
     var datos = await llamar.apply(null, [funcion].concat(args));
     S.datos = datos;
     return datos;
@@ -280,6 +281,146 @@ window.addEventListener('online', function () {
   Object.keys(subidas).forEach(reintentarSubida);
 });
 
+/* ---------------- Acciones rápidas sin espera ----------------
+   Destacar, ocultar y mover se ven al momento, sin bloquear la pantalla. Reglas de seguridad:
+   - Lo que se ve = último estado CONFIRMADO por el servidor + cambios pendientes (marcados "Guardando…").
+   - Las acciones van al servidor de una en una y en el orden en que se tocaron.
+   - Si una falla, se descartan las pendientes de ese mismo producto (se pensaron sobre un estado que
+     no se guardó), la tarjeta vuelve a su estado real y se avisa con claridad.
+   - Una respuesta vieja del servidor nunca reemplaza a una más nueva (se comparan por versión).
+   - Las acciones con espera (guardar formulario, eliminar, ajustes) esperan a que terminen las rápidas. */
+
+var confirmado = null;   // último estado que dio el servidor
+var pendientes = [];     // acciones rápidas aún no confirmadas (la primera es la que va en camino)
+var vistaCalculada = null;
+var vistaVieja = true;
+
+delete S.datos;
+Object.defineProperty(S, 'datos', {
+  configurable: true,
+  get: function () {
+    if (vistaVieja) {
+      if (!confirmado) { vistaCalculada = null; } else {
+        vistaCalculada = JSON.parse(JSON.stringify(confirmado));
+        pendientes.forEach(function (op) { op.aplicar(vistaCalculada); });
+      }
+      vistaVieja = false;
+    }
+    return vistaCalculada;
+  },
+  set: function (nuevo) {
+    // Una respuesta que llega tarde (de antes de otro cambio ya confirmado) no se usa.
+    if (nuevo && confirmado && nuevo.version != null && confirmado.version != null && nuevo.version < confirmado.version) return;
+    confirmado = nuevo;
+    vistaVieja = true;
+  },
+});
+
+var procesandoRapida = false;
+var esperandoRapidas = [];
+
+function claveDe(op) { return op.tipo + ':' + op.id; }
+function estaGuardando(tipo, id) {
+  return pendientes.some(function (op) { return op.tipo === tipo && op.id === id; });
+}
+function hayRapidasPendientes() { return pendientes.length > 0; }
+
+/** Espera a que se confirmen todas las acciones rápidas (para que el orden en el servidor sea el mismo). */
+function esperarRapidas() {
+  if (!pendientes.length) return Promise.resolve();
+  return new Promise(function (resolver) { esperandoRapidas.push(resolver); });
+}
+
+function accionRapida(op) {
+  pendientes.push(op);
+  vistaVieja = true;
+  refrescarListas();
+  procesarRapidas();
+}
+
+async function procesarRapidas() {
+  if (procesandoRapida) return;
+  var op = pendientes[0];
+  if (!op) {
+    var avisados = esperandoRapidas; esperandoRapidas = [];
+    avisados.forEach(function (r) { r(); });
+    return;
+  }
+  procesandoRapida = true;
+  try {
+    var datos = await llamar.apply(null, [op.funcion].concat(op.args));
+    pendientes.shift();
+    S.datos = datos;
+  } catch (err) {
+    pendientes.shift();
+    var clave = claveDe(op);
+    pendientes = pendientes.filter(function (x) { return claveDe(x) !== clave; });
+    vistaVieja = true;
+    avisar('No se guardó: ' + op.descripcion + '. ' + err.message + ' La tarjeta volvió a como estaba; inténtalo de nuevo.', 'error');
+  } finally {
+    procesandoRapida = false;
+    vistaVieja = true;
+    refrescarListas();
+    procesarRapidas();
+  }
+}
+
+/** Vuelve a dibujar solo las listas (nunca un formulario abierto, para no borrar lo que se escribe). */
+function refrescarListas() {
+  if (S.vista === 'productos' && $('resultados')) renderResultados();
+  else if (S.vista === 'paquetes') renderPaquetes();
+}
+
+function ordenarComoServidor(a, b) {
+  var oa = a.orden == null ? Infinity : a.orden;
+  var ob = b.orden == null ? Infinity : b.orden;
+  return oa - ob || a.nombre.localeCompare(b.nombre, 'es');
+}
+
+/** Igual que reordenar_ en Codigo.gs: mueve un lugar dentro de su grupo y renumera 1..n. */
+function moverEnLista(lista, id, mismoGrupo, direccion) {
+  var item = lista.filter(function (x) { return x.id === id; })[0];
+  if (!item) return;
+  var grupo = lista.filter(function (x) { return mismoGrupo(x, item); }).sort(ordenarComoServidor);
+  var desde = grupo.indexOf(item);
+  var hasta = Math.max(0, Math.min(grupo.length - 1, desde + (direccion < 0 ? -1 : 1)));
+  grupo.splice(desde, 1);
+  grupo.splice(hasta, 0, item);
+  grupo.forEach(function (x, i) { x.orden = i + 1; });
+  lista.sort(ordenarComoServidor);
+}
+
+function rapidaProducto(id, campo, valor, descripcion) {
+  accionRapida({
+    tipo: 'p', id: id, funcion: 'panelCambiarProducto', args: [id, campo, valor], descripcion: descripcion,
+    aplicar: function (d) { d.productos.forEach(function (x) { if (x.id === id) x[campo] = valor; }); },
+  });
+}
+function rapidaMoverProducto(id, direccion, descripcion) {
+  accionRapida({
+    tipo: 'p', id: id, funcion: 'panelMoverProducto', args: [id, direccion], descripcion: descripcion,
+    aplicar: function (d) { moverEnLista(d.productos, id, function (x, y) { return x.categoria === y.categoria; }, direccion); },
+  });
+}
+function rapidaPaquete(id, valor, descripcion) {
+  accionRapida({
+    tipo: 'k', id: id, funcion: 'panelCambiarPaquete', args: [id, 'disponible', valor], descripcion: descripcion,
+    aplicar: function (d) { d.paquetes.forEach(function (x) { if (x.id === id) x.disponible = valor; }); },
+  });
+}
+function rapidaMoverPaquete(id, direccion, descripcion) {
+  accionRapida({
+    tipo: 'k', id: id, funcion: 'panelMoverPaquete', args: [id, direccion], descripcion: descripcion,
+    aplicar: function (d) { moverEnLista(d.paquetes, id, function (x, y) { return x.servicioId === y.servicioId; }, direccion); },
+  });
+}
+
+function guardandoHtml(tipo, id) {
+  return estaGuardando(tipo, id)
+    ? '<div class="item-guardando" role="status"><span class="girador-chico"></span>Guardando…</div>'
+    : '';
+}
+
 /* ---------------- Navegación ---------------- */
 
 function categoria(id) { return S.datos.config.categorias.filter(function (c) { return c.id === id; })[0]; }
@@ -303,6 +444,7 @@ async function ir(destino) {
 
 function render() {
   if (!S.datos) return;
+  $('nav-agregar').hidden = S.vista === 'producto' || S.vista === 'paquete';
   if (S.vista === 'productos') renderProductos();
   else if (S.vista === 'paquetes') renderPaquetes();
   else if (S.vista === 'ajustes') renderAjustes();
@@ -326,8 +468,7 @@ function renderProductos() {
     '<div class="filtros">' + filtros.map(function (f) {
       return '<button type="button" class="filtro" data-filtro="' + esc(f.id) + '" aria-pressed="' + (S.filtro === f.id) + '">' +
         esc(f.nombre) + ' <span class="num">' + f.n + '</span></button>';
-    }).join('') + '</div><div id="resultados"></div>' +
-    '<button type="button" class="agregar" data-accion="nuevo-producto">' + ico('mas') + 'Agregar</button>';
+    }).join('') + '</div><div id="resultados"></div>';
   vista.innerHTML = html;
   renderResultados();
 }
@@ -381,6 +522,7 @@ function tarjetaProducto(p, grupo) {
       '</div></div>' +
       '<svg class="ico" style="width:24px;height:24px;color:var(--texto-suave)" aria-hidden="true"><use href="#i-lapiz"/></svg>' +
     '</button>' +
+    guardandoHtml('p', p.id) +
     estadoSubidaHtml(p.id) +
     '<div class="item-acciones">' +
       '<button type="button" data-accion="destacar" data-id="' + esc(p.id) + '" class="' + (p.destacado ? 'activo' : '') + '">' +
@@ -435,7 +577,7 @@ function renderFormProducto() {
         '<button type="button" class="boton boton-suave" data-accion="foto-camara">' + ico('camara') + 'Tomar foto</button>' +
         '<button type="button" class="boton boton-suave" data-accion="foto-galeria">' + ico('galeria') + 'Galería</button>' +
       '</div>' +
-      (fotoSrc ? '<button type="button" class="foto-quitar" data-accion="foto-quitar">Quitar la foto</button>' : '') +
+      (fotoSrc ? '<hr class="foto-separador"><button type="button" class="foto-quitar" data-accion="foto-quitar">' + ico('basura') + 'Quitar la foto</button>' : '') +
     '</div>' +
 
     '<div class="tarjeta-form">' +
@@ -579,6 +721,7 @@ function renderPaquetes() {
           '<div class="etiquetas">' + (k.disponible ? '' : '<span class="etiqueta oculta">Oculto</span>') +
           (k.incluye.length ? '<span class="etiqueta">' + k.incluye.length + ' cosas incluidas</span>' : '') + '</div></div>' +
           '<svg class="ico" style="width:24px;height:24px;color:var(--texto-suave)" aria-hidden="true"><use href="#i-lapiz"/></svg></button>' +
+          guardandoHtml('k', k.id) +
           '<div class="item-acciones" style="grid-template-columns:2fr 56px 56px">' +
           '<button type="button" data-accion="ocultar-paquete" data-id="' + esc(k.id) + '" class="' + (k.disponible ? '' : 'apagado') + '">' +
             ico(k.disponible ? 'ojo' : 'ojo-no') + (k.disponible ? 'Visible' : 'Oculto') + '</button>' +
@@ -826,24 +969,26 @@ document.addEventListener('click', async function (e) {
         S.fotoNueva = null; S.quitarFoto = true; S.cambios = true; return render();
       case 'reintentar-foto': return reintentarSubida(id);
       case 'destacar':
-        await accion(p.destacado ? 'Quitando estrella…' : 'Destacando…', 'panelCambiarProducto', id, 'destacado', !p.destacado);
-        render(); return avisar(p.destacado ? 'Ya no está destacado' : '★ Destacado');
+        return rapidaProducto(id, 'destacado', !p.destacado, (p.destacado ? 'quitar la estrella a «' : 'destacar «') + p.nombre + '»');
       case 'ocultar':
-        await accion(p.disponible ? 'Ocultando…' : 'Mostrando…', 'panelCambiarProducto', id, 'disponible', !p.disponible);
-        render(); return avisar(p.disponible ? 'Oculto: ya no se ve en el catálogo' : 'Visible en el catálogo');
+        return rapidaProducto(id, 'disponible', !p.disponible, (p.disponible ? 'ocultar «' : 'mostrar «') + p.nombre + '»');
       case 'subir': case 'bajar':
-        await accion('Moviendo…', 'panelMoverProducto', id, b.dataset.accion === 'subir' ? -1 : 1);
-        return render();
+        return rapidaMoverProducto(id, b.dataset.accion === 'subir' ? -1 : 1, 'mover «' + p.nombre + '»');
       case 'nuevo-paquete': return abrirPaquete(null, b.dataset.servicio);
       case 'editar-paquete': return abrirPaquete(id);
       case 'guardar-paquete': return guardarPaquete();
       case 'eliminar-paquete': return eliminarPaquete();
       case 'ocultar-paquete':
-        await accion(k.disponible ? 'Ocultando…' : 'Mostrando…', 'panelCambiarPaquete', id, 'disponible', !k.disponible);
-        render(); return avisar(k.disponible ? 'Paquete oculto' : 'Paquete visible');
+        return rapidaPaquete(id, !k.disponible, (k.disponible ? 'ocultar el paquete «' : 'mostrar el paquete «') + k.nombre + '»');
       case 'subir-paquete': case 'bajar-paquete':
-        await accion('Moviendo…', 'panelMoverPaquete', id, b.dataset.accion === 'subir-paquete' ? -1 : 1);
-        return render();
+        return rapidaMoverPaquete(id, b.dataset.accion === 'subir-paquete' ? -1 : 1, 'mover el paquete «' + k.nombre + '»');
+      case 'agregar-nav':
+        if (S.vista === 'paquetes') {
+          if (!servicios().length) return avisar('Primero agrega un servicio en Productos, con la categoría de servicios.', 'error');
+          return abrirPaquete(null);
+        }
+        if (S.vista !== 'productos') await ir('productos');
+        return abrirProducto(null);
       case 'guardar-contacto': {
         var c = leerAjustesContacto();
         return guardarAjustes({
@@ -929,7 +1074,24 @@ document.addEventListener('change', function (e) {
 });
 
 window.addEventListener('beforeunload', function (e) {
-  if (S.cambios || haySubidasPendientes()) { e.preventDefault(); e.returnValue = ''; }
+  if (S.cambios || haySubidasPendientes() || hayRapidasPendientes()) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* ---------------- Teclado ----------------
+   Mientras se escribe en un campo, el teclado ocupa media pantalla: se esconde la barra de abajo
+   y "Guardar" deja de flotar, para que se vea lo que se escribe. Al cerrar el teclado, todo vuelve. */
+function esCampoDeTexto(el) {
+  return el && (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' ||
+    (el.tagName === 'INPUT' && ['checkbox', 'radio', 'file', 'button'].indexOf(el.type) < 0));
+}
+document.addEventListener('focusin', function (e) {
+  if (esCampoDeTexto(e.target)) document.body.classList.add('escribiendo');
+});
+document.addEventListener('focusout', function () {
+  // Al pasar de un campo a otro no se muestra la barra un instante.
+  setTimeout(function () {
+    if (!esCampoDeTexto(document.activeElement)) document.body.classList.remove('escribiendo');
+  }, 80);
 });
 
 /* ---------------- Inicio ---------------- */

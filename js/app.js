@@ -22,10 +22,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
 ));
 const icono = (id, clase = 'ico') => `<svg class="${clase}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
 
-function imagen(foto, alt, ancho) {
+function imagen(foto, alt, ancho, prioridad = false) {
   const src = urlFoto(foto, ancho);
   if (!src) return `<img class="sin-foto" src="${LOGO}" alt="${esc(alt)}" loading="lazy">`;
-  return `<img src="${esc(src)}" alt="${esc(alt)}" loading="lazy" decoding="async">`;
+  const carga = prioridad ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
+  return `<img src="${esc(src)}" alt="${esc(alt)}" ${carga} decoding="async">`;
 }
 
 // Si una foto no carga, se pone el logo en su lugar.
@@ -75,13 +76,13 @@ async function pedirDatos() {
 let ultimaConsulta = 0;
 let consultando = false;
 
-async function actualizarDesdeServidor() {
+async function actualizarDesdeServidor(pedido) {
   if (consultando) return;
   consultando = true;
   ultimaConsulta = Date.now();
   const cache = leerCache();
   try {
-    const nuevo = await pedirDatos();
+    const nuevo = await (pedido || pedirDatos());
     if (!cache || JSON.stringify(cache) !== JSON.stringify(nuevo)) {
       guardarCache(nuevo);
       aplicar(nuevo);
@@ -95,9 +96,11 @@ async function actualizarDesdeServidor() {
 }
 
 function iniciar() {
+  const pedido = pedirDatos(); // primero se pide; mientras llega, se pinta la copia guardada
+  pedido.catch(() => {});
   const cache = leerCache();
   if (cache) aplicar(cache);
-  actualizarDesdeServidor();
+  actualizarDesdeServidor(pedido);
 }
 
 const REVISAR_CADA = 10_000;
@@ -128,6 +131,7 @@ function aplicar(crudo) {
 function render() {
   renderPestanas();
   renderOcasiones();
+  marcarSiHayMas();
   renderTemporada();
   renderLista();
   actualizarUrl();
@@ -146,11 +150,19 @@ function renderOcasiones() {
   if (enServicios) estado.ocasion = '';
   const lista = enServicios ? [] : ocasionesConProductos(estado.datos, estado.busqueda ? '' : estado.categoria);
   const chips = [{ id: '', nombre: 'Todas', emoji: '✨' }, ...lista];
-  $('ocasiones').hidden = lista.length === 0;
+  $('barra-ocasiones').hidden = lista.length === 0;
   $('ocasiones').innerHTML = chips.map((o) => `
     <button type="button" class="chip" data-ocasion="${esc(o.id)}" aria-pressed="${o.id === estado.ocasion}">
       ${o.emoji ? esc(o.emoji) + ' ' : ''}${esc(o.nombre)}</button>`).join('');
 }
+
+/** Desvanece el borde derecho de la fila de ocasiones mientras queden filtros por ver. */
+function marcarSiHayMas() {
+  const fila = $('ocasiones');
+  fila.classList.toggle('hay-mas', fila.scrollWidth - fila.clientWidth - fila.scrollLeft > 4);
+}
+$('ocasiones').addEventListener('scroll', marcarSiHayMas, { passive: true });
+window.addEventListener('resize', marcarSiHayMas, { passive: true });
 
 function renderTemporada() {
   const { config } = estado.datos;
@@ -160,7 +172,7 @@ function renderTemporada() {
   if (!items.length) return;
   const oc = config.ocasiones.find((o) => o.id === config.temporada);
   $('temporada-titulo').textContent = config.temporadaTitulo || `Temporada: ${oc?.nombre ?? ''}`;
-  $('temporada-lista').innerHTML = items.map((p) => tarjeta(p, true)).join('');
+  $('temporada-lista').innerHTML = items.map((p, i) => tarjeta(p, true, i < 2)).join('');
 }
 
 function renderLista() {
@@ -180,8 +192,9 @@ function renderLista() {
     ? `${n} ${n === 1 ? 'servicio' : 'servicios'} · elige un paquete y cotiza sin compromiso`
     : `${n} ${n === 1 ? 'opción' : 'opciones'} · toca una foto para ver más`;
 
-  $('lista').innerHTML = items.map((p) => (
-    tipoDeCategoria(p.categoria, config) === 'servicios' ? bloqueServicio(p) : tarjeta(p)
+  const conTemporada = !$('temporada').hidden;
+  $('lista').innerHTML = items.map((p, i) => (
+    tipoDeCategoria(p.categoria, config) === 'servicios' ? bloqueServicio(p, i === 0) : tarjeta(p, false, !conTemporada && i < 4)
   )).join('');
 
   $('vacio').hidden = n > 0;
@@ -192,14 +205,14 @@ function renderLista() {
   }
 }
 
-function tarjeta(p, enCarrusel = false) {
+function tarjeta(p, enCarrusel = false, prioridad = false) {
   const { config } = estado.datos;
   const precio = textoPrecio(p);
   const wa = enlaceWhatsApp(numeroPara('productos', config), mensajeProducto(p, config));
   return `
     <article class="tarjeta" data-id="${esc(p.id)}">
       <button type="button" class="tarjeta-foto" data-detalle="${esc(p.id)}" aria-label="Ver ${esc(p.nombre)}">
-        ${imagen(p.foto, p.nombre, enCarrusel ? 500 : 400)}
+        ${imagen(p.foto, p.nombre, enCarrusel ? 500 : 400, prioridad)}
         ${p.destacado && !enCarrusel ? `<span class="insignia">${icono('star')}Favorito</span>` : ''}
       </button>
       <div class="tarjeta-cuerpo">
@@ -211,14 +224,14 @@ function tarjeta(p, enCarrusel = false) {
     </article>`;
 }
 
-function bloqueServicio(s) {
+function bloqueServicio(s, prioridad = false) {
   const { config } = estado.datos;
   const numero = numeroPara('servicios', config);
   const paquetes = paquetesDeServicio(estado.datos, s.id);
   const precio = textoPrecio(s);
   return `
     <article class="servicio" data-id="${esc(s.id)}">
-      <div class="servicio-foto">${imagen(s.foto, s.nombre, 800)}</div>
+      <div class="servicio-foto">${imagen(s.foto, s.nombre, 800, prioridad)}</div>
       <div class="servicio-cuerpo">
         <h3 class="servicio-nombre">${esc(s.nombre)}</h3>
         <p class="servicio-desc">${esc(s.descripcion)}</p>
@@ -350,9 +363,12 @@ document.addEventListener('click', (e) => {
 });
 
 function irAlContenido() {
+  // Lugar natural de la fila fija = justo debajo del buscador. (offsetTop de un elemento
+  // pegado devuelve donde está pegado, no su lugar en la página.)
   const barra = $('barra');
-  if (barra.getBoundingClientRect().top <= 1) {
-    window.scrollTo({ top: barra.offsetTop, behavior: 'smooth' });
+  const inicio = barra.offsetTop + barra.offsetHeight;
+  if (window.scrollY > inicio) {
+    window.scrollTo({ top: inicio, behavior: 'smooth' });
   }
 }
 
@@ -378,8 +394,16 @@ function limpiarBusqueda() {
 }
 
 new IntersectionObserver(([entrada]) => {
-  $('barra').classList.toggle('pegada', !entrada.isIntersecting);
-}).observe(document.querySelector('.portada'));
+  $('barra-ocasiones').classList.toggle('pegada', !entrada.isIntersecting);
+}).observe($('barra'));
+
+// El botón flotante de WhatsApp se aparta mientras hay productos debajo del pulgar
+// (cada producto ya tiene su "Lo quiero") y vuelve en la portada y en el pie.
+// La franja vigilada es el 18 % de abajo de la pantalla (donde está el botón); en porcentaje
+// se ajusta sola cuando cambia el alto (barra de Safari que se esconde, teclado, giro).
+new IntersectionObserver(([entrada]) => {
+  $('wa-flotante').classList.toggle('apartado', entrada.isIntersecting);
+}, { rootMargin: '-82% 0px 0px 0px' }).observe($('contenido'));
 
 /* Un poco de confeti la primera vez, como en su página */
 function confeti() {

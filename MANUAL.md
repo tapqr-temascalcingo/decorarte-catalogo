@@ -47,7 +47,7 @@ Abajo siempre tienes tres botones grandes: **Productos**, **Paquetes** y **Ajust
 <img src="docs/capturas/13-panel-ocasiones-precio.jpg" width="240" alt="Ocasiones y precio">
 </p>
 
-1. En **Productos**, toca el botón rosa **＋ Agregar**.
+1. Toca el botón rosa **＋ Agregar**, abajo a la derecha, en la barra de abajo.
 2. **Foto:** toca **Tomar foto** para usar la cámara, o **Galería** para elegir una que ya tengas.
    El panel la hace más ligera solo, para que suba rápido y el catálogo cargue veloz.
 3. Escribe el **Nombre** y una **Descripción** corta (qué incluye, si se personaliza…).
@@ -112,6 +112,10 @@ Cada tarjeta tiene botones abajo:
 | 👁 **Visible / Oculto** | Lo muestra o lo esconde del catálogo. Ideal cuando se te acaba algo. |
 | ↑ ↓ | Lo sube o lo baja en la lista. |
 
+Estos cambios se ven **al momento**, sin esperar. Si tu señal está lenta, la tarjeta dice **"Guardando…"** unos segundos:
+espera a que desaparezca antes de cerrar el panel.
+Si no se pudo guardar, la tarjeta **regresa a como estaba** y sale un aviso rojo que dice qué no se guardó. Solo vuelve a tocar el botón.
+
 Para **cambiar el nombre, la foto, el precio o las ocasiones**, toca la foto o el nombre del producto (o el lápiz ✏️).
 
 ---
@@ -135,7 +139,7 @@ Si solo quieres quitarlo por un tiempo, es mejor **ocultarlo**.
 Cada servicio (charcutería, montaje de mesas, renta de mobiliario…) puede tener varios paquetes:
 
 1. Primero crea el servicio en **Productos**, con la categoría **Servicios** y una buena foto.
-2. Ve a **Paquetes** y toca **＋ Agregar paquete a…**.
+2. Ve a **Paquetes** y toca **＋ Agregar paquete a…** debajo del servicio (o **＋ Agregar** en la barra de abajo).
 3. Pon el nombre (por ejemplo, "Fiesta 25 personas"), el precio y **qué incluye**, una cosa por renglón.
 
 En el catálogo, cada paquete tiene su botón **Cotizar** por WhatsApp.

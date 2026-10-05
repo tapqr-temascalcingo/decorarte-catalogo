@@ -694,7 +694,11 @@ function panelCargar() {
 
 function panelCargarSinVerificar_() {
   const d = leerTodo_();
-  return { config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO };
+  // version: para que el panel nunca reemplace datos nuevos con una respuesta que llegó tarde.
+  return {
+    config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO,
+    version: Number(versionDatos_()),
+  };
 }
 
 /**

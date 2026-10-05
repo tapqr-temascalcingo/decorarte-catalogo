@@ -40,6 +40,8 @@
 
   // google.script.run de mentira: asíncrono y con datos serializados como en Google.
   // window.__falloSubida = n  hace que las siguientes n subidas de foto fallen (señal perdida).
+  // window.__fallar = { panelCambiarProducto: 1 }  hace fallar las siguientes llamadas a esa función.
+  // window.__demoraRapida = ms  hace lentas las acciones rápidas (destacar, ocultar, mover).
   var demora = Number(parametros.get('demora') || 120);
   function corredor(exito, fallo) {
     return new Proxy({}, {
@@ -48,13 +50,18 @@
         if (nombre === 'withFailureHandler') return function (f) { return corredor(exito, f); };
         return function () {
           var args = JSON.parse(JSON.stringify(Array.prototype.slice.call(arguments)));
-          var espera = nombre === 'panelSubirFotoProducto' ? Number(window.__demoraSubida || demora) : demora;
+          var espera = nombre === 'panelSubirFotoProducto' ? Number(window.__demoraSubida || demora)
+            : /^panel(Cambiar|Mover)/.test(nombre) && window.__demoraRapida ? Number(window.__demoraRapida) : demora;
           setTimeout(function () {
             try {
               if (typeof window[nombre] !== 'function' || /_$/.test(nombre)) throw new Error('Función no disponible: ' + nombre);
               if (nombre === 'panelSubirFotoProducto' && window.__falloSubida > 0) {
                 window.__falloSubida -= 1;
                 throw new Error('Se perdió la conexión');
+              }
+              if (window.__fallar && window.__fallar[nombre] > 0) {
+                window.__fallar[nombre] -= 1;
+                throw new Error('Se perdió la conexión.');
               }
               var r = window[nombre].apply(null, args);
               if (exito) exito(r === undefined ? null : JSON.parse(JSON.stringify(r)));

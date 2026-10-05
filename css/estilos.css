@@ -12,7 +12,7 @@
   --rosa-hover: #b23a6f;
   --dorado: #d4af37;
   --dorado-claro: #e9cf9a;
-  --dorado-texto: #9a7209;
+  --dorado-texto: #8a6608;  /* contraste 5.2:1 sobre blanco */
   --texto: #4a3a40;
   --texto-suave: #7d646c;
   --borde: #f3dbe3;
@@ -23,10 +23,12 @@
   --sans: 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --manuscrita: 'Caveat', cursive;
   --ancho: 1080px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --alto-ocasiones: 64px;  /* fila fija de filtros */
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: 150px; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: calc(var(--alto-ocasiones) + 8px); }
 body {
   margin: 0;
   font-family: var(--sans);
@@ -54,7 +56,7 @@ a { color: inherit; }
 .aviso-demo {
   background: var(--texto);
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   text-align: center;
   padding: 6px 16px;
   letter-spacing: 0.2px;
@@ -63,10 +65,10 @@ a { color: inherit; }
 /* ---------- Portada ---------- */
 .portada {
   text-align: center;
-  padding: 22px 16px 10px;
+  padding: 14px 16px 2px;
 }
 .portada-logo {
-  width: 132px; height: 132px;
+  width: 104px; height: 104px;
   margin: 0 auto;
   border-radius: 50%;
   box-shadow: 0 10px 30px rgba(214, 150, 170, 0.35);
@@ -74,33 +76,36 @@ a { color: inherit; }
 }
 .portada-lema {
   font-family: var(--manuscrita);
-  font-size: 25px;
+  font-size: 24px;
   font-weight: 700;
   color: #6b4a52;
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   line-height: 1.15;
 }
 .portada-lugar {
-  margin: 4px 0 0;
-  font-size: 11px;
-  letter-spacing: 1.3px;
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  letter-spacing: 1px;
   text-transform: uppercase;
-  color: #b0939b;
+  color: var(--texto-suave);
   display: inline-flex; gap: 4px; align-items: center;
 }
 
-/* ---------- Barra fija: pestañas, buscador y ocasiones ---------- */
-.barra {
-  position: sticky; top: 0; z-index: 20;
-  padding: 10px 16px 8px;
-  background: rgba(255, 250, 249, 0.86);
-  backdrop-filter: saturate(1.4) blur(12px);
-  -webkit-backdrop-filter: saturate(1.4) blur(12px);
-  border-bottom: 1px solid transparent;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-.barra.pegada { border-bottom-color: var(--borde); box-shadow: 0 6px 18px rgba(214, 150, 170, 0.12); }
+/* ---------- Pestañas y buscador (se desplazan con la página) ---------- */
+.barra { padding: 10px 16px 0; }
 .barra > * { max-width: var(--ancho); margin-left: auto; margin-right: auto; }
+
+/* ---------- Lo único fijo arriba: una fila de filtros de ocasión ----------
+   Sin desenfoque de fondo (backdrop-filter): en teléfonos sencillos hace que el desplazamiento se trabe.
+   Al pegarse solo aparece una sombra suave; no hay nada que se mueva ni cambie de tamaño. */
+.barra-ocasiones {
+  position: sticky; top: 0; z-index: 20;
+  padding: 10px 0;
+  background: rgba(255, 250, 249, 0.97);
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+}
+.barra-ocasiones.pegada { border-bottom-color: var(--borde); box-shadow: 0 6px 16px rgba(214, 150, 170, 0.16); }
 
 .pestanas {
   display: flex;
@@ -155,25 +160,31 @@ a { color: inherit; }
   display: flex; gap: 8px;
   overflow-x: auto;
   scrollbar-width: none;
-  margin-top: 10px;
-  padding: 2px 16px 4px;
-  margin-left: -16px; margin-right: -16px;
+  padding: 0 16px;
+  max-width: var(--ancho); margin: 0 auto;
   scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
 }
 .ocasiones::-webkit-scrollbar { display: none; }
+/* Señal discreta de que la fila se desliza: el borde derecho se desvanece mientras haya más filtros */
+.ocasiones.hay-mas {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent);
+}
 .chip {
   flex: none;
   scroll-snap-align: start;
+  display: inline-flex; align-items: center;
   border: 1px solid var(--borde);
   background: #fff;
   border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 13.5px;
+  padding: 0 16px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  min-height: 38px;
-  transition: background 0.2s, border-color 0.2s;
+  min-height: 44px;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 .chip[aria-pressed="true"] { background: var(--texto); border-color: var(--texto); color: #fff; }
 
@@ -186,14 +197,15 @@ main { padding: 6px 16px 40px; max-width: var(--ancho); margin: 0 auto; }
   margin: 18px 0 4px;
   display: flex; align-items: center; gap: 8px;
 }
-.conteo { margin: 0 0 12px; font-size: 13px; color: var(--texto-suave); }
+.conteo { margin: 0 0 12px; font-size: 14px; color: var(--texto-suave); }
 
 .temporada {
-  margin: 8px -16px 0;
-  padding: 2px 16px 12px;
+  margin: 0 -16px 0;
+  padding: 0 16px 12px;
   background: linear-gradient(180deg, rgba(251, 228, 236, 0.75), rgba(251, 228, 236, 0));
   border-radius: 0 0 26px 26px;
 }
+.temporada .titulo-seccion { margin-top: 8px; }
 .carrusel {
   display: grid;
   grid-auto-flow: column;
@@ -238,7 +250,7 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
   position: absolute; top: 8px; left: 8px;
   background: rgba(255, 255, 255, 0.92);
   color: var(--dorado-texto);
-  font-size: 11px; font-weight: 600;
+  font-size: 12.5px; font-weight: 600;
   padding: 3px 8px 3px 6px;
   border-radius: 999px;
   display: inline-flex; align-items: center; gap: 3px;
@@ -247,13 +259,14 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
 .tarjeta-nombre {
   font-family: var(--serif);
   font-weight: 600;
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.25;
   margin: 0;
 }
 .tarjeta-nombre button { all: unset; cursor: pointer; }
 .tarjeta-desc {
-  font-size: 12.5px;
+  font-size: 14px;
+  line-height: 1.4;
   color: var(--texto-suave);
   margin: 4px 0 8px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -264,7 +277,7 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
   font-size: 15px;
   color: var(--rosa-fuerte);
 }
-.precio.consultar { font-size: 13px; color: var(--dorado-texto); }
+.precio.consultar { font-size: 14px; color: var(--dorado-texto); }
 
 /* ---------- Botones ---------- */
 .boton {
@@ -288,7 +301,7 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
 }
 .boton-wa:hover { background: var(--rosa-hover); }
 .boton-suave { background: var(--rosa-claro); color: var(--texto); }
-.tarjeta .boton { margin-top: 10px; width: 100%; padding: 9px 10px; font-size: 13.5px; }
+.tarjeta .boton { margin-top: 10px; width: 100%; min-height: 46px; padding: 10px; font-size: 15px; }
 
 /* ---------- Servicios ---------- */
 .servicio {
@@ -359,9 +372,9 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
 .red::after { content: '→'; margin-left: auto; color: var(--dorado-texto); font-family: var(--sans); }
 .pie-ubicacion {
   display: inline-flex; align-items: center; gap: 5px;
-  margin-top: 18px;
-  font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase;
-  color: #a88a93; text-decoration: none;
+  margin-top: 18px; min-height: 44px;
+  font-size: 13px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--texto-suave); text-decoration: none;
 }
 a.pie-ubicacion[href] { text-decoration: underline; text-underline-offset: 3px; }
 .pie-horario { font-size: 13px; color: var(--texto-suave); margin: 6px 0 0; }
@@ -377,8 +390,10 @@ a.pie-ubicacion[href] { text-decoration: underline; text-underline-offset: 3px; 
   display: grid; place-items: center;
   box-shadow: var(--sombra-fuerte);
   z-index: 30;
-  animation: aparecer 0.4s 0.6s ease both;
+  animation: aparecer 0.4s 0.6s ease backwards; /* solo la entrada; después manda la transición */
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
+.wa-flotante.apartado { opacity: 0; transform: translateY(12px) scale(0.96); pointer-events: none; }
 .wa-flotante svg { width: 30px; height: 30px; }
 
 /* ---------- Detalle (hoja inferior) ---------- */
@@ -395,6 +410,8 @@ a.pie-ubicacion[href] { text-decoration: underline; text-underline-offset: 3px; 
 }
 .detalle[open] { animation: subir 0.28s ease both; }
 .detalle::backdrop { background: rgba(74, 58, 64, 0.45); backdrop-filter: blur(2px); }
+.detalle-cerrar:focus { outline: none; }
+.detalle-cerrar:focus-visible { outline: 3px solid var(--rosa-fuerte); outline-offset: 3px; }
 .detalle-cerrar {
   position: sticky; top: 10px; float: right; margin: 10px 10px -54px 0;
   width: 44px; height: 44px; border-radius: 50%;
@@ -409,7 +426,7 @@ a.pie-ubicacion[href] { text-decoration: underline; text-underline-offset: 3px; 
 .detalle-info .precio { font-size: 19px; display: block; margin: 4px 0 10px; }
 .detalle-info p { margin: 0 0 12px; }
 .etiquetas { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
-.etiquetas li { background: var(--rosa-claro); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; }
+.etiquetas li { background: var(--rosa-claro); border-radius: 999px; padding: 4px 12px; font-size: 14px; }
 .detalle .boton { width: 100%; font-size: 16px; min-height: 52px; }
 
 @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } }
@@ -424,11 +441,12 @@ a.pie-ubicacion[href] { text-decoration: underline; text-underline-offset: 3px; 
 
 /* ---------- Pantallas más grandes ---------- */
 @media (min-width: 640px) {
-  .ocasiones { margin-left: auto; margin-right: auto; padding-left: 0; padding-right: 0; flex-wrap: wrap; }
+  .ocasiones { padding-left: 16px; padding-right: 16px; flex-wrap: wrap; }
+  .ocasiones.hay-mas { -webkit-mask-image: none; mask-image: none; }
   .rejilla { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
   .carrusel { grid-auto-columns: 34%; }
   .tarjeta-nombre { font-size: 16.5px; }
-  .tarjeta-desc { font-size: 13px; }
+  .tarjeta-desc { font-size: 14px; }
   .servicio { display: grid; grid-template-columns: 0.9fr 1.1fr; }
   .servicio-foto { aspect-ratio: auto; min-height: 100%; }
   .paquetes { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
