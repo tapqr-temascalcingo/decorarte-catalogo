@@ -6,7 +6,7 @@
 //           No es secreta: el panel solo deja entrar a los correos autorizados.
 // whatsappRespaldo: número para el botón de contacto si el catálogo no logra cargar.
 export const CONFIG = {
-  endpoint: 'https://script.google.com/macros/s/AKfycbyUl6tN45ACkqIoibr3S3DiP_6xS-jKxf2WyLrveeLZnTzB4ssTtPxgE1bCDj0yBfrM/exec',
-  panel: 'https://script.google.com/macros/s/AKfycbxjOLEO_59wqJt_bKrgyWyabxhUzcn1Avc5rVbjmMR99p5oFckZ0DpjgwN_PhyH_cvG/exec',
+  endpoint: 'https://script.google.com/macros/s/AKfycbw7F7dZuC67mM1ccM2zalNo3kLsCzc4bTSd9aCY_wm_xKiu5nqW1o7zx7Kl7nyZyruKJg/exec',
+  panel: 'https://script.google.com/macros/s/AKfycby5-G5Rqb0SaaiiGRnxfoot4ISENE2lxZRa9jJWrcSxqapk0ExEKYBez9Q-wCNlx2t6Rw/exec',
   whatsappRespaldo: '527122319080',
 };
