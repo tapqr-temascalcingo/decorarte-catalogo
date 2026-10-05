@@ -188,10 +188,13 @@ test.describe('panel', () => {
 
     await page.click('[data-accion="agregar-fila"][data-lista="ocasiones"]');
     await page.locator('[data-lista="ocasiones"][data-prop="nombre"]').last().fill('XV años');
-    await page.click('[data-accion="agregar-fila"][data-lista="autorizados"]');
-    await page.locator('input[data-lista="autorizados"]').last().fill('ayudante@gmail.com');
     await page.locator('[data-accion="guardar-listas"]').first().click();
     await expect(page.locator('#aviso')).toContainText('guardado');
+    await page.click('[data-accion="agregar-fila"][data-lista="autorizados"]');
+    await page.locator('input[data-lista="autorizados"]').last().fill('ayudante@gmail.com');
+    await page.click('[data-accion="guardar-personas"]');
+    await expect(page.locator('#aviso')).toContainText('Personas guardadas');
+    await expect(page.locator('.resultado-accesos')).toContainText('Se le compartió la hoja a ayudante@gmail.com');
 
     const c = await page.evaluate(() => __gs.api().config);
     expect(c.whatsappServicios).toBe('527129998877');
@@ -211,5 +214,5 @@ test.describe('panel', () => {
 
 test('correo no autorizado no puede usar el panel', async ({ page }) => {
   await page.goto('/panel-local/?usuario=intruso@gmail.com');
-  await expect(page.locator('.vacio')).toContainText('No tienes permiso');
+  await expect(page.locator('.vacio')).toContainText('no tiene permiso para ver la hoja');
 });

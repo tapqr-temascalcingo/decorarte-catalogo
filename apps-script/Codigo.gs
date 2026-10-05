@@ -64,6 +64,7 @@ const CONFIG_INICIAL = [
   ['temporadaTitulo', '', 'Título de la sección de temporada (opcional)'],
   ['autorizados', '', 'Correos que pueden entrar al panel, uno por renglón'],
   ['carpetaFotos', '', 'ID de la carpeta de Drive con las fotos (no modificar)'],
+  ['contactoAdmin', '', 'A quién avisar si una persona autorizada no puede entrar (lo ve esa persona en el panel)'],
 ];
 
 /* =====================================================================
@@ -88,6 +89,9 @@ function doGet() {
   if (!esPanel_()) return respuestaApi_();
 
   const correo = correoActual_();
+  // La revisión real de acceso es la hoja. Sin la hoja compartida no se puede leer la lista:
+  // la copia de la lista (propiedades del script) solo elige qué mensaje ver, nunca deja entrar.
+  if (!tieneAccesoAHoja_()) return paginaSinHoja_(correo);
   if (!estaAutorizado_(correo)) return paginaSinAcceso_(correo);
 
   const plantilla = HtmlService.createTemplateFromFile('Panel');
@@ -113,6 +117,26 @@ function respuestaApi_() {
     texto = JSON.stringify({ error: 'No se pudo leer el catálogo: ' + err.message });
   }
   return ContentService.createTextOutput(texto).setMimeType(ContentService.MimeType.JSON);
+}
+
+/** Autorizada en la lista, pero sin la hoja compartida: qué pasa y a quién avisar. */
+function paginaSinHoja_(correo) {
+  const copia = copiaDeAccesos_();
+  if (!correo || copia.autorizados.indexOf(correo) < 0) return paginaSinAcceso_(correo);
+  const contacto = copia.contacto || 'quien administra tu catálogo';
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500&display=swap" rel="stylesheet">
+    <style>body{font-family:Poppins,sans-serif;background:linear-gradient(160deg,#fffaf9,#faeaee);color:#4a3a40;
+    display:grid;place-items:center;min-height:100vh;margin:0;padding:24px;text-align:center}
+    img{width:120px;border-radius:50%}h1{font-family:'Playfair Display',serif;font-size:24px}
+    p{font-size:17px;line-height:1.5;max-width:420px}.correo{overflow-wrap:anywhere}.contacto{background:#fff;border-radius:16px;padding:14px 18px;box-shadow:0 6px 18px rgba(214,150,170,.2)}</style></head><body><div>
+    <img src="${URL_LOGO}" alt="Decorarte"><h1>Ya casi puedes entrar</h1>
+    <p>Tu cuenta <b class="correo">${escaparHtml_(correo)}</b> sí tiene permiso para el panel,
+    pero todavía no tiene compartida la hoja donde se guarda el catálogo.</p>
+    <p class="contacto">Avísale a <b>${escaparHtml_(contacto)}</b> para que te la comparta.</p>
+    <p>Cuando te avisen, vuelve a abrir el panel.</p></div></body></html>`;
+  return HtmlService.createHtmlOutput(html).setTitle('Decorarte · Panel')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 function paginaSinAcceso_(correo) {
@@ -151,6 +175,9 @@ function onEdit(e) {
   // Solo para ediciones reales en la hoja: un objeto armado desde fuera no trae funciones.
   if (!e || !e.range || typeof e.range.getSheet !== 'function') return;
   nuevaVersionDatos_();
+  try {
+    if (e.range.getSheet().getName() === HOJA_CONFIG) actualizarCopiaDeAccesos_(leerConfigCruda_());
+  } catch (err) { /* se actualiza en la siguiente apertura del panel */ }
 }
 
 function publicarCambios() {
@@ -176,11 +203,14 @@ function instalar() {
   prepararConfig_(libro);
   registrar_('3/4 Carpeta de fotos');
   carpetaFotos_();
-  registrar_('4/4 Publicar');
+  registrar_('4/4 Accesos y publicar');
+  const accesos = sincronizarAccesos_(lineas_(leerConfigCruda_().autorizados), []);
+  actualizarCopiaDeAccesos_(leerConfigCruda_());
   const sobrante = libro.getSheetByName('Hoja 1') || libro.getSheetByName('Sheet1');
   if (sobrante && libro.getSheets().length > 1 && sobrante.getLastRow() === 0) libro.deleteSheet(sobrante);
   refrescarCache_();
-  avisar_('Listo. La hoja está preparada. Sigue con el paso "Publicar" de la guía de instalación.');
+  avisar_('Listo. La hoja está preparada. Sigue con el paso "Publicar" de la guía de instalación.' +
+    (accesos.fallidos.length ? ' No se pudo compartir con: ' + accesos.fallidos.map((f) => f.correo).join(', ') + '.' : ''));
 }
 
 function prepararPestanas_(libro) {
@@ -272,7 +302,96 @@ function estaAutorizado_(correo) {
 /** Funciones del panel: solo en la implementación "Panel" y solo para correos autorizados. */
 function verificarAcceso_() {
   if (!esPanel_()) throw new Error('Esta función no está disponible aquí.');
+  if (!tieneAccesoAHoja_()) {
+    const contacto = copiaDeAccesos_().contacto || 'quien administra tu catálogo';
+    throw new Error(`Tu cuenta no tiene permiso para ver la hoja del catálogo. Avísale a ${contacto}.`);
+  }
   if (!estaAutorizado_(correoActual_())) throw new Error('No tienes permiso para hacer cambios.');
+}
+
+/* =====================================================================
+ *  Personas con acceso: compartir la hoja automáticamente
+ *
+ *  - Solo quien administra (la cuenta que instaló) cambia la lista.
+ *  - Al guardar, se comparte la hoja como Editor con quien entra a la lista y se le quita a quien sale.
+ *    Google le manda a la persona un correo de aviso: es normal.
+ *  - Hay una COPIA de la lista en las propiedades del script, porque sin la hoja compartida no se
+ *    puede leer la lista. Esa copia SOLO decide qué mensaje se muestra; quién entra lo decide la hoja.
+ *    Se actualiza en cada guardado, al ejecutar instalar, al abrir el panel y si se edita la hoja a mano.
+ * ===================================================================== */
+
+function esAdministrador_() {
+  const yo = correoActual_();
+  return !!yo && yo === propietario_();
+}
+
+/** ¿Esta cuenta puede leer la hoja? (falso si no se la han compartido) */
+function tieneAccesoAHoja_() {
+  try {
+    libro_().getSheetByName(HOJA_CONFIG);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function copiaDeAccesos_() {
+  const props = PropertiesService.getScriptProperties();
+  let autorizados = [];
+  try { autorizados = JSON.parse(props.getProperty('copiaAutorizados') || '[]'); } catch (e) { /* vacía */ }
+  return { autorizados: autorizados, contacto: props.getProperty('copiaContacto') || '' };
+}
+
+function actualizarCopiaDeAccesos_(configCruda) {
+  const props = PropertiesService.getScriptProperties();
+  const lista = JSON.stringify(lineas_(configCruda.autorizados).map((x) => x.toLowerCase()));
+  const contacto = String(configCruda.contactoAdmin || '').trim();
+  if (props.getProperty('copiaAutorizados') !== lista) props.setProperty('copiaAutorizados', lista);
+  if ((props.getProperty('copiaContacto') || '') !== contacto) props.setProperty('copiaContacto', contacto);
+}
+
+function correosConLaHoja_(libro) {
+  const correos = libro.getEditors().map((u) => String(u.getEmail()).toLowerCase());
+  try { const d = libro.getOwner(); if (d) correos.push(String(d.getEmail()).toLowerCase()); } catch (e) { /* sin dueño visible */ }
+  return correos;
+}
+
+/**
+ * Comparte la hoja con quien está en "nuevos" y no la tiene, y se la quita a quien estaba en
+ * "anteriores" y ya no está. Nunca le quita el acceso a quien administra ni a quien está usando el panel.
+ * Devuelve { compartidos, quitados, fallidos: [{ correo, motivo }] }.
+ */
+function sincronizarAccesos_(nuevos, anteriores) {
+  const libro = libro_();
+  const conHoja = correosConLaHoja_(libro);
+  const protegidos = [propietario_(), correoActual_()].filter(Boolean);
+  const r = { compartidos: [], quitados: [], fallidos: [] };
+  nuevos.map((x) => x.toLowerCase()).forEach((correo) => {
+    if (conHoja.indexOf(correo) >= 0) return;
+    try {
+      libro.addEditor(correo);
+      r.compartidos.push(correo);
+    } catch (e) {
+      r.fallidos.push({ correo: correo, motivo: motivoAmable_(e) });
+    }
+  });
+  anteriores.map((x) => x.toLowerCase()).forEach((correo) => {
+    if (nuevos.indexOf(correo) >= 0 || protegidos.indexOf(correo) >= 0 || conHoja.indexOf(correo) < 0) return;
+    try {
+      libro.removeEditor(correo);
+      r.quitados.push(correo);
+    } catch (e) {
+      r.fallidos.push({ correo: correo, motivo: 'no se le pudo quitar la hoja (' + motivoAmable_(e) + ')' });
+    }
+  });
+  return r;
+}
+
+function motivoAmable_(e) {
+  const m = String((e && e.message) || e);
+  if (/invalid|inválid|no válid|not.*(found|exist)|no existe/i.test(m)) return 'no parece ser una cuenta de Google (Gmail)';
+  if (/permis|permission|access/i.test(m)) return 'tu cuenta no tiene permiso para compartir la hoja';
+  return m;
 }
 
 /**
@@ -284,7 +403,7 @@ function verificarDuena_() {
   const duena = propietario_();
   const efectivo = (Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
   if (!correo || (duena ? correo !== duena : correo !== efectivo)) {
-    throw new Error('Solo la dueña del catálogo puede ejecutar esta función.');
+    throw new Error('Solo quien administra el catálogo puede ejecutar esta función.');
   }
 }
 
@@ -695,9 +814,11 @@ function panelCargar() {
 function panelCargarSinVerificar_() {
   const d = leerTodo_();
   // version: para que el panel nunca reemplace datos nuevos con una respuesta que llegó tarde.
+  try { actualizarCopiaDeAccesos_(leerConfigCruda_()); } catch (e) { /* no impide trabajar */ }
   return {
     config: d.config, productos: d.productos, paquetes: d.paquetes, correo: correoActual_(), urlCatalogo: URL_CATALOGO,
     version: Number(versionDatos_()),
+    esAdministrador: esAdministrador_(),
   };
 }
 
@@ -915,16 +1036,31 @@ function panelGuardarConfig(datos) {
       const temporada = 'temporada' in valores ? valores.temporada : leerConfigCruda_().temporada;
       if (temporada && !ocs.some((o) => o.id === temporada)) valores.temporada = '';
     }
+    const anteriores = lineas_(leerConfigCruda_().autorizados).map((x) => x.toLowerCase());
+    let accesos = null;
+    if ('contactoAdmin' in datos) {
+      if (!esAdministrador_()) throw new Error('Solo quien administra el catálogo puede cambiar este dato.');
+      valores.contactoAdmin = String(datos.contactoAdmin == null ? '' : datos.contactoAdmin).trim();
+    }
     if (Array.isArray(datos.autorizados)) {
-      const correos = datos.autorizados.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
-      const invalido = correos.find((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
-      if (invalido) throw new Error(`"${invalido}" no parece un correo.`);
-      const yo = correoActual_();
-      if (yo && correos.indexOf(yo) < 0) correos.unshift(yo); // nadie se puede dejar fuera a sí mismo
-      valores.autorizados = correos.filter((c, i) => correos.indexOf(c) === i).join('\n');
+      let correos = datos.autorizados.map((c) => String(c).trim().toLowerCase()).filter(Boolean);
+      correos = correos.filter((c, i) => correos.indexOf(c) === i);
+      const igual = correos.length === anteriores.length && correos.every((c, i) => c === anteriores[i]);
+      if (!igual) {
+        if (!esAdministrador_()) throw new Error('Solo quien administra el catálogo puede agregar personas.');
+        const invalido = correos.find((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+        if (invalido) throw new Error(`"${invalido}" no parece un correo.`);
+        const yo = correoActual_();
+        if (yo && correos.indexOf(yo) < 0) correos.unshift(yo); // nadie se puede dejar fuera a sí mismo
+        accesos = sincronizarAccesos_(correos, anteriores);
+        // Quien no se pudo compartir no queda en la lista (no tendría cómo entrar)
+        const sinHoja = accesos.fallidos.map((f) => f.correo).filter((x) => anteriores.indexOf(x) < 0);
+        valores.autorizados = correos.filter((c) => sinHoja.indexOf(c) < 0).join('\n');
+      }
     }
     guardarClavesConfig_(valores);
-    return panelCargarSinVerificar_();
+    actualizarCopiaDeAccesos_(leerConfigCruda_());
+    return Object.assign(panelCargarSinVerificar_(), accesos ? { accesos: accesos } : {});
   });
 }
 

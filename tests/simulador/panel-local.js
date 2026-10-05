@@ -6,6 +6,8 @@
  *   ?usuario=correo        sesión de quien entra ('' = sin sesión). Por defecto, la dueña.
  *   ?implementacion=api    simula que estas llamadas llegan a la implementación "API catálogo".
  *   ?vacio                 sin productos de ejemplo.   ?demora=ms  latencia de cada llamada.
+ *   ?invitar=a@x,b@y       la administradora agrega a esas personas (se les comparte la hoja).
+ *   ?sinHoja=a@x           a esa persona se le quitó la hoja a mano (sigue en la lista).
  */
 (function () {
   function leerSincrono(url) {
@@ -36,6 +38,15 @@
   // La dueña instala desde el editor; después entra quien diga la URL.
   window.__gs.instalar();
   if (!parametros.has('vacio')) window.__gs.cargarEjemplos();
+  // ?invitar=correo,correo  la administradora agrega esas personas (se les comparte la hoja)
+  if (parametros.get('invitar') && implementacion === 'panel') {
+    window.panelGuardarConfig({
+      autorizados: ['duena@gmail.com'].concat(parametros.get('invitar').split(',')),
+      contactoAdmin: parametros.get('contacto') || 'Jesús, de Agencia Digital Temas, WhatsApp 712 334 4128',
+    });
+  }
+  // ?sinHoja=correo  le quita la hoja a esa persona "a mano" (sigue en la lista)
+  if (parametros.get('sinHoja')) entorno.__simulador.estado.editores.delete(parametros.get('sinHoja'));
   entorno.__simulador.estado.usuario = usuario;
 
   // google.script.run de mentira: asíncrono y con datos serializados como en Google.

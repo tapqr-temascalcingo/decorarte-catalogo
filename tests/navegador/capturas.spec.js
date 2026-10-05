@@ -188,3 +188,18 @@ test.describe('ayuda en iPhone', () => {
     await guardar(page.locator('#ayuda'), '24-ayuda-varias-cuentas');
   });
 });
+
+test('personas con acceso: lo que ve la dueña', async ({ page }) => {
+  const ROSA = 'tienda.rosa@gmail.com';
+  await page.goto(`/panel-local/?invitar=${ROSA}&usuario=${ROSA}`);
+  await page.click('[data-ir="ajustes"]');
+  await page.locator('#personas').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await guardar(page.locator('#personas'), '25-panel-personas-duena');
+
+  await page.goto(`/panel-local/?invitar=${ROSA}&sinHoja=${ROSA}&usuario=${ROSA}`);
+  const html = await page.evaluate(() => __gs.doGet({ parameter: {} }).getContent());
+  await page.setContent(html.replace(/https:\/\/tapqr-temascalcingo\.github\.io\/decorarte-catalogo\//g, 'http://localhost:8090/'));
+  await page.waitForTimeout(600);
+  await guardar(page, '26-ya-casi-puedes-entrar');
+});

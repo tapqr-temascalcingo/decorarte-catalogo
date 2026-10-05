@@ -93,10 +93,10 @@ test.describe('funciones del panel llamadas en la implementación API', () => {
         ['panelGuardarConfig', { whatsapp: '7120000000' }], ['panelSubirFotoProducto', 'p1', '/9j/4AAQ', 'image/jpeg', 'x'],
       ].map(([fn, ...args]) => llamar(fn, ...args).then(() => 'permitida', (e) => e.message))));
       for (const r of resultados) expect(r).toMatch(/no está disponible/);
-      // instalar, cargarEjemplos y publicarCambios: solo la dueña
+      // instalar, cargarEjemplos y publicarCambios: solo quien administra
       const otras = await page.evaluate(() => Promise.all(['instalar', 'publicarCambios'].map((fn) => llamar(fn).then(() => 'permitida', (e) => e.message))));
       if (usuario) expect(otras).toEqual(['permitida', 'permitida']); // la dueña sí puede (no cambian datos)
-      else for (const r of otras) expect(r).toMatch(/Solo la dueña/);
+      else for (const r of otras) expect(r).toMatch(/Solo quien administra/);
       const publico = await page.evaluate(() => __gs.api());
       expect(publico.productos.map((p) => p.id)).toContain('p1');
       expect(publico.config.whatsapp).toBe('527122319080');

@@ -20,6 +20,9 @@
       archivosHtml: opciones.archivosHtml || {},
       contador: 0,
       fallas: {}, // nombre de operación -> número de veces que debe fallar (para simular cortes)
+      editores: new Set(),               // cuentas con la hoja compartida como Editor
+      editoresPuedenCompartir: false,    // la casilla que se desmarca en la hoja (INSTALACION.md)
+      correosCompartidos: [],            // avisos que Google mandaría al compartir
     };
     const efectivo = () => (estado.ejecutaComo === 'propietario' ? estado.propietario : estado.usuario);
     function quizaFallar(operacion) {
@@ -93,11 +96,38 @@
     }
 
     const hojas = [crearHoja('Hoja 1')];
+    // Solo la dueña de la hoja y quienes la tienen compartida pueden leerla (como en Google).
+    const tieneAcceso = () => efectivo() === estado.propietario || estado.editores.has(efectivo());
+    function exigirAcceso() {
+      if (!tieneAcceso()) throw new Error('Exception: No cuentas con el permiso necesario para acceder al documento solicitado.');
+    }
+    function exigirCompartir() {
+      exigirAcceso();
+      if (efectivo() !== estado.propietario && !estado.editoresPuedenCompartir) {
+        throw new Error('Exception: Access denied: You do not have permission to share this document.');
+      }
+    }
+    const usuario = (correo) => ({ getEmail: () => correo });
     const libro = encadenable({
       getId: () => 'libro-de-prueba',
-      getSheetByName: (n) => hojas.find((h) => h.getName() === n) || null,
-      getSheets: () => hojas.slice(),
+      getSheetByName: (n) => { exigirAcceso(); return hojas.find((h) => h.getName() === n) || null; },
+      getSheets: () => { exigirAcceso(); return hojas.slice(); },
+      getOwner: () => usuario(estado.propietario),
+      getEditors: () => { exigirAcceso(); return [...estado.editores].map(usuario); },
+      addEditor(correo) {
+        exigirCompartir();
+        correo = String(correo).toLowerCase();
+        if (!/@/.test(correo) || /@no-es-google\.test$/.test(correo)) throw new Error('Exception: Invalid email: ' + correo);
+        if (correo !== estado.propietario) { estado.editores.add(correo); estado.correosCompartidos.push(correo); }
+        return libro;
+      },
+      removeEditor(correo) {
+        exigirCompartir();
+        estado.editores.delete(String(correo).toLowerCase());
+        return libro;
+      },
       insertSheet(n) {
+        exigirAcceso();
         quizaFallar('insertSheet');
         if (hojas.some((h) => h.getName() === n)) throw new Error(`Ya existe una hoja con el nombre "${n}"`);
         const h = crearHoja(n);

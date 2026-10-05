@@ -30,10 +30,21 @@ https://tapqr-temascalcingo.github.io/decorarte-catalogo/panel/ y sigue las inst
 
 <img src="docs/capturas/22-acceso-directo.jpg" width="240" alt="Página para instalar el acceso directo">
 
-Entras con la **cuenta de Google del negocio** (la que se creó solo para el catálogo). Nadie más puede entrar, salvo las personas que tú autorices.
+Entras con **tu propio correo de Google** (tu Gmail). Solo pueden entrar las personas que la agencia agregó.
 
-> 💡 Usa el panel siempre en el mismo navegador, donde **solo** esté la cuenta del negocio (por ejemplo, Chrome).
-> Si ahí también abres tu cuenta personal, Google se confunde. Lo explicamos en la sección 9.
+> 💡 Usa el panel siempre en el mismo navegador, donde **solo** esté la cuenta con la que entras al panel (por ejemplo, Chrome).
+> Si ahí tienes abiertas otras cuentas de Google, Google se confunde. Lo explicamos en la sección 9.
+
+### La primera vez
+
+1. **Te llega un correo de Google** que dice que te compartieron la hoja **"Decorarte – Catálogo"**. Es normal: es la hoja donde
+   se guarda tu catálogo. No tienes que hacer nada con ese correo.
+2. Al tocar el ícono por primera vez, Google te pide **iniciar sesión**: entra con tu Gmail.
+3. Sale una pantalla que dice **"Google no verificó esta app"**. Es normal: es una app hecha solo para tu catálogo.
+   Toca **Configuración avanzada** (o **Avanzado**) y después **Ir a Decorarte Panel (no seguro)**.
+4. Sale **"Decorarte Panel quiere acceder a tu Cuenta de Google"** con una lista de permisos (tus hojas de cálculo, solo los
+   archivos de Drive que uses con esta app, y tu correo). Toca **Continuar** o **Permitir**.
+5. Listo: aparece **Tus productos**. Las siguientes veces entras directo.
 
 Abajo siempre tienes tres botones grandes: **Productos**, **Paquetes** y **Ajustes**.
 
@@ -79,15 +90,15 @@ Abajo siempre tienes tres botones grandes: **Productos**, **Paquetes** y **Ajust
   También se reintenta solo cuando el teléfono recupera la conexión.
 - Si cierras el panel antes de que termine, no se pierde: la foto queda guardada en tu teléfono y se sube la próxima vez que abras el panel.
 
-### Sube las fotos siempre desde la cuenta del negocio
+### Tus fotos viven en tu Google Drive: no borres la carpeta
 
-Las fotos se guardan en el Google Drive **de la cuenta con la que entraste al panel**.
+Las fotos que subes se guardan en **tu** Google Drive, en una carpeta llamada **Decorarte Catálogo – Fotos**
+(se crea sola la primera vez que subes una foto).
 
-- Si entras con la cuenta del negocio, quedan en la carpeta **Decorarte Catálogo – Fotos** del negocio, que es lo correcto.
-- Si alguien sube fotos con **otra** cuenta (por ejemplo, una ayudante con su Gmail), esas fotos quedan en el Drive **de esa persona**.
-  Se ven en el catálogo, pero si ella las borra o deja de usar su cuenta, **las fotos desaparecen del catálogo**.
-
-Por eso: **las fotos, siempre desde la cuenta del negocio.**
+- **No borres esa carpeta ni las fotos que tiene.** El catálogo las muestra desde ahí: si las borras, en el catálogo
+  aparece el logo en lugar de la foto.
+- Si cambias o quitas la foto de un producto desde el panel, la vieja se va sola a la papelera de Drive.
+- Si otra persona con acceso sube fotos con su propia cuenta, esas fotos quedan en el Drive **de esa persona**.
 
 En la parte de abajo del formulario también están:
 
@@ -162,7 +173,10 @@ En el catálogo, cada paquete tiene su botón **Cotizar** por WhatsApp.
   Una ocasión nueva (por ejemplo, **Navidad**) **no aparece en el catálogo hasta que tenga al menos un producto visible**.
   Mientras tanto, en Ajustes verás debajo la nota *"Aún sin productos: aparecerá en el catálogo cuando tenga al menos uno visible."*
   Para que aparezca, abre un producto y marca esa ocasión.
-- **Personas con acceso:** si alguien te ayuda, agrega su Gmail. *(Pide que también le compartan la hoja; viene en la guía de instalación).*
+- **Personas con acceso:** aquí ves quién puede entrar al panel. **Solo la agencia puede agregar o quitar personas**:
+  verás el aviso *"Solo quien administra el catálogo puede agregar personas"*. Si quieres que alguien te ayude, avísale a la agencia.
+
+  <img src="docs/capturas/25-panel-personas-duena.jpg" width="260" alt="Lista de personas con acceso, solo para ver">
 
 Cada sección tiene su propio botón **Guardar**.
 
@@ -170,9 +184,15 @@ Cada sección tiene su propio botón **Guardar**.
 
 ## 8. Si algo no sale como esperabas
 
+<p>
 <img src="docs/capturas/23-sin-acceso.jpg" width="220" alt="Panel privado">
+<img src="docs/capturas/26-ya-casi-puedes-entrar.jpg" width="220" alt="Ya casi puedes entrar">
+</p>
 
-- **"Este panel es privado":** entraste con otra cuenta de Google. Abre el panel desde el ícono del navegador del negocio (sección 9).
+- **"Este panel es privado":** entraste con otra cuenta de Google, no con la que te agregaron. Abre el panel desde el ícono
+  del navegador donde solo está tu cuenta (sección 9).
+- **"Ya casi puedes entrar":** tu cuenta sí tiene permiso, pero falta que te compartan la hoja del catálogo.
+  La pantalla te dice a quién avisar (la agencia). Cuando te avisen, vuelve a abrir el panel.
 - **«No se pudo abrir el archivo»:** mira la sección 9.
 - **Hice un cambio y no lo veo en el catálogo:** recarga la página del catálogo. Los cambios aparecen en unos segundos.
   Si es una ocasión nueva, recuerda que aparece hasta que tenga un producto.
@@ -186,20 +206,21 @@ Cada sección tiene su propio botón **Guardar**.
 
 <img src="docs/capturas/24-ayuda-varias-cuentas.jpg" width="260" alt="Ayuda para varias cuentas de Google">
 
-**Por qué pasa:** tu teléfono tiene abiertas **dos cuentas de Google** (la personal y la del negocio) en el mismo navegador.
-Google no sabe con cuál abrir el panel y muestra ese mensaje. No es tu culpa ni se descompuso nada.
+**Por qué pasa:** tu teléfono tiene abiertas **dos o más cuentas de Google** en el mismo navegador (por ejemplo, tu Gmail y
+la cuenta de tu trabajo o de tu familia). Google no sabe con cuál abrir el panel y muestra ese mensaje.
+No es tu culpa ni se descompuso nada.
 
 **La solución que mejor funciona: un navegador solo para el catálogo.**
 
-1. Si en **Safari** tienes tu cuenta personal, usa **Google Chrome** para el panel. Si no lo tienes, descárgalo gratis de la App Store.
-2. Abre **Chrome** y entra a **google.com**. Toca **Iniciar sesión** y entra **solo con la cuenta del negocio**.
-   No agregues tu cuenta personal en Chrome.
+1. Si en **Safari** tienes varias cuentas, usa **Google Chrome** para el panel. Si no lo tienes, descárgalo gratis de la App Store.
+2. Abre **Chrome** y entra a **google.com**. Toca **Iniciar sesión** y entra **solo con el Gmail con el que te agregaron al panel**.
+   No agregues otras cuentas en Chrome.
 3. En Chrome, abre esta dirección: **tapqr-temascalcingo.github.io/decorarte-catalogo/panel/**
    (o, desde Safari, toca el ícono del panel y luego **Abrir esta página en Chrome**).
 4. En Chrome toca el botón **Compartir** (el cuadrito con una flecha, arriba a la derecha) → **Agregar a pantalla de inicio**.
 5. Listo: usa **ese ícono nuevo** de ahora en adelante. Puedes borrar el ícono viejo (déjalo presionado → **Eliminar**).
 
-Tu cuenta personal sigue en Safari como siempre; solo el panel vive en Chrome.
+Tus otras cuentas siguen en Safari como siempre; solo el panel vive en Chrome.
 
 **Si de todos modos necesitas entrar desde otro navegador:** cuando te salga el error, regresa al ícono. Verás la ayuda con
 los botones **Cuenta 1**, **Cuenta 2** y **Cuenta 3**. Prueba uno por uno: a veces alguno abre el panel con la cuenta correcta,
@@ -209,6 +230,7 @@ pero no siempre funciona. Si ninguno sirve, usa la solución de arriba.
 
 ## Tu información está segura
 
-- Todo queda guardado en tu hoja **Decorarte – Catálogo** de Google Drive, que sirve de respaldo. No necesitas abrirla.
+- Todo queda guardado en la hoja **Decorarte – Catálogo**, que la agencia te compartió y sirve de respaldo. No necesitas abrirla;
+  si la abres, **no cambies ni borres nada a mano**: todo se maneja desde el panel.
 - Las fotos están en tu carpeta **Decorarte Catálogo – Fotos**. Las que borras o cambias van a la papelera de Drive, donde se pueden recuperar durante 30 días.
 - En tu Drive, el panel solo puede tocar las fotos y la carpeta que él mismo creó. No puede ver tus demás archivos ni fotos.

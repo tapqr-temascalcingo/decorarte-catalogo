@@ -57,7 +57,7 @@ describe('instalación', () => {
     const carpetas = Object.values(archivos).filter((a) => a.tipo === 'application/vnd.google-apps.folder');
     assert.equal(carpetas.length, 1);
     assert.equal(gs.leerConfigCruda_().carpetaFotos, carpetas[0].id);
-    assert.equal(libro.getSheetByName('Configuración').getLastRow(), 1 + 16);
+    assert.equal(libro.getSheetByName('Configuración').getLastRow(), 1 + 17);
   });
 
   test('si la carpeta se creó pero no se anotó, la encuentra en vez de crear otra', () => {
@@ -90,18 +90,18 @@ describe('instalación', () => {
     const gs = conEjemplos();
     for (const fn of ['instalar', 'cargarEjemplos', 'publicarCambios']) {
       gs.comoUsuario('ayudante@gmail.com');
-      assert.throws(() => gs[fn](), /Solo la dueña/, `${fn} con otra cuenta`);
+      assert.throws(() => gs[fn](), /Solo quien administra/, `${fn} con otra cuenta`);
       gs.comoUsuario('');
-      assert.throws(() => gs[fn](), /Solo la dueña/, `${fn} sin sesión`);
+      assert.throws(() => gs[fn](), /Solo quien administra/, `${fn} sin sesión`);
     }
     // Aunque la ayudante esté autorizada para el panel, no puede ejecutarlas
     gs.comoUsuario('duena@gmail.com');
     gs.panelGuardarConfig({ autorizados: ['ayudante@gmail.com'] });
     gs.comoUsuario('ayudante@gmail.com');
     assert.doesNotThrow(() => gs.panelCargar());
-    assert.throws(() => gs.publicarCambios(), /Solo la dueña/);
+    assert.throws(() => gs.publicarCambios(), /Solo quien administra/);
     // Ni desde la implementación API con la sesión de alguien más
-    assert.throws(() => gs.enApi((api) => api.instalar(), { sesion: 'otra@gmail.com' }), /Solo la dueña/);
+    assert.throws(() => gs.enApi((api) => api.instalar(), { sesion: 'otra@gmail.com' }), /Solo quien administra/);
   });
 });
 
@@ -371,5 +371,112 @@ describe('fotos (drive.file)', () => {
     const carpetasAyudante = Object.values(gs.__simulador.archivos)
       .filter((a) => a.dueno === 'ayudante@gmail.com' && a.tipo === 'application/vnd.google-apps.folder');
     assert.equal(carpetasAyudante.length, 1, 'reutiliza su carpeta');
+  });
+});
+
+describe('personas con acceso: compartir la hoja', () => {
+  const copia = (gs) => plano(gs.copiaDeAccesos_());
+
+  test('agregar una persona le comparte la hoja, actualiza la copia y ya puede entrar', () => {
+    const gs = conEjemplos();
+    const r = plano(gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'Tienda.Rosa@gmail.com'] }));
+    assert.deepEqual(r.accesos, { compartidos: ['tienda.rosa@gmail.com'], quitados: [], fallidos: [] });
+    assert.ok(gs.__simulador.estado.editores.has('tienda.rosa@gmail.com'));
+    assert.deepEqual(plano(gs.__simulador.estado.correosCompartidos), ['tienda.rosa@gmail.com'], 'Google le avisa por correo');
+    assert.deepEqual(copia(gs).autorizados, ['duena@gmail.com', 'tienda.rosa@gmail.com']);
+    gs.comoUsuario('tienda.rosa@gmail.com');
+    assert.equal(gs.doGet({ parameter: {} }).getContent(), '[plantilla Panel]');
+    assert.equal(gs.panelCargar().esAdministrador, false);
+  });
+
+  test('quitarla le retira la hoja: ya no entra ni la puede leer', () => {
+    const gs = conEjemplos();
+    gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'tienda.rosa@gmail.com'] });
+    const r = plano(gs.panelGuardarConfig({ autorizados: ['duena@gmail.com'] }));
+    assert.deepEqual(r.accesos.quitados, ['tienda.rosa@gmail.com']);
+    assert.ok(!gs.__simulador.estado.editores.has('tienda.rosa@gmail.com'));
+    gs.comoUsuario('tienda.rosa@gmail.com');
+    assert.match(gs.doGet({ parameter: {} }).getContent(), /no está autorizado/);
+    assert.throws(() => gs.panelCargar(), /permiso/);
+    assert.throws(() => gs.leerConfigCruda_(), /No cuentas con el permiso/, 'la hoja ya no se puede leer');
+  });
+
+  test('si no se puede compartir, lo dice y no la deja en la lista', () => {
+    const gs = conEjemplos();
+    const r = plano(gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'alguien@no-es-google.test'] }));
+    assert.equal(r.accesos.fallidos.length, 1);
+    assert.equal(r.accesos.fallidos[0].correo, 'alguien@no-es-google.test');
+    assert.match(r.accesos.fallidos[0].motivo, /cuenta de Google/);
+    assert.deepEqual(plano(r.config.autorizados), ['duena@gmail.com']);
+    assert.deepEqual(copia(gs).autorizados, ['duena@gmail.com']);
+  });
+
+  test('autorizada sin la hoja compartida: mensaje sencillo con el contacto, no el error técnico', () => {
+    const gs = conEjemplos();
+    gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'tienda.rosa@gmail.com'], contactoAdmin: 'Jesús, de Agencia Digital Temas, WhatsApp 712 334 4128' });
+    gs.__simulador.estado.editores.delete('tienda.rosa@gmail.com'); // alguien le quitó la hoja a mano
+    gs.comoUsuario('tienda.rosa@gmail.com');
+    const html = gs.doGet({ parameter: {} }).getContent();
+    assert.match(html, /Ya casi puedes entrar/);
+    assert.match(html, /Jesús, de Agencia Digital Temas, WhatsApp 712 334 4128/);
+    assert.ok(!/Exception|línea|Código/.test(html));
+    assert.throws(() => gs.panelCargar(), /no tiene permiso para ver la hoja del catálogo\. Avísale a Jesús/);
+  });
+
+  test('la copia solo elige el mensaje: estar en la copia no deja entrar ni muestra el contacto a desconocidos', () => {
+    const gs = conEjemplos();
+    gs.panelGuardarConfig({ contactoAdmin: 'Jesús, WhatsApp 712 334 4128' });
+    // Alguien logra meter su correo en la copia (sin estar en la hoja ni tenerla compartida)
+    gs.__simulador.propiedades.copiaAutorizados = JSON.stringify(['duena@gmail.com', 'intruso@gmail.com']);
+    gs.comoUsuario('intruso@gmail.com');
+    assert.match(gs.doGet({ parameter: {} }).getContent(), /Ya casi puedes entrar/); // solo cambia el mensaje
+    for (const [fn, ...args] of FUNCIONES_PANEL) assert.throws(() => gs[fn](...args), /permiso/, fn);
+    // Un desconocido que no está en la copia no ve el contacto
+    gs.comoUsuario('otro@gmail.com');
+    assert.ok(!/712 334 4128/.test(gs.doGet({ parameter: {} }).getContent()));
+    // Con la hoja compartida pero fuera de la lista tampoco entra: manda la lista de la hoja
+    gs.__simulador.estado.editores.add('otro@gmail.com');
+    assert.match(gs.doGet({ parameter: {} }).getContent(), /no está autorizado/);
+    assert.throws(() => gs.panelCargar(), /permiso/);
+  });
+
+  test('solo quien administra cambia la lista y el contacto; los demás guardan lo suyo sin tocarla', () => {
+    const gs = conEjemplos();
+    gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'tienda.rosa@gmail.com'] });
+    gs.comoUsuario('tienda.rosa@gmail.com');
+    assert.throws(() => gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'tienda.rosa@gmail.com', 'prima@gmail.com'] }),
+      /Solo quien administra el catálogo puede agregar personas/);
+    assert.throws(() => gs.panelGuardarConfig({ autorizados: ['tienda.rosa@gmail.com'] }), /Solo quien administra/);
+    assert.throws(() => gs.panelGuardarConfig({ contactoAdmin: 'otra cosa' }), /Solo quien administra/);
+    // Guardar ocasiones mandando la misma lista sí funciona
+    const c = plano(gs.panelCargar().config);
+    assert.doesNotThrow(() => gs.panelGuardarConfig({ ocasiones: c.ocasiones, autorizados: c.autorizados }));
+    assert.ok(!gs.__simulador.estado.editores.has('prima@gmail.com'));
+  });
+
+  test('nunca le quita la hoja a quien administra', () => {
+    const gs = conEjemplos();
+    const r = plano(gs.panelGuardarConfig({ autorizados: [] }));
+    assert.deepEqual(plano(r.config.autorizados), ['duena@gmail.com']);
+    assert.doesNotThrow(() => gs.panelCargar());
+  });
+
+  test('la copia no se desfasa: guardado, instalar y edición a mano de la hoja', () => {
+    const gs = conEjemplos();
+    gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'a@gmail.com'], contactoAdmin: 'Jesús' });
+    assert.deepEqual(copia(gs), { autorizados: ['duena@gmail.com', 'a@gmail.com'], contacto: 'Jesús' });
+    // Edición a mano en la hoja (con el disparador onEdit)
+    gs.guardarClavesConfig_({ autorizados: 'duena@gmail.com\nb@gmail.com', contactoAdmin: 'Jesús, 712 334 4128' });
+    gs.onEdit({ range: { getSheet: () => ({ getName: () => 'Configuración' }) } });
+    assert.deepEqual(copia(gs), { autorizados: ['duena@gmail.com', 'b@gmail.com'], contacto: 'Jesús, 712 334 4128' });
+    // instalar comparte con quien esté en la lista y deja la copia al día
+    gs.__simulador.propiedades.copiaAutorizados = '[]';
+    gs.enEditor((g) => g.instalar());
+    assert.ok(gs.__simulador.estado.editores.has('b@gmail.com'));
+    assert.deepEqual(copia(gs).autorizados, ['duena@gmail.com', 'b@gmail.com']);
+    // Abrir el panel también la deja al día
+    gs.__simulador.propiedades.copiaAutorizados = '[]';
+    gs.panelCargar();
+    assert.deepEqual(copia(gs).autorizados, ['duena@gmail.com', 'b@gmail.com']);
   });
 });

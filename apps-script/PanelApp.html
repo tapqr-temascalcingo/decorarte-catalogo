@@ -429,6 +429,7 @@ function servicios() { return S.datos.productos.filter(esServicio); }
 
 async function ir(destino) {
   if (S.cambios && !(await confirmar('¿Salir sin guardar?', 'Los cambios que hiciste se perderán.', 'Sí, salir'))) return;
+  S.resultadoAccesos = null;
   S.cambios = false;
   S.form = null;
   S.fotoNueva = null;
@@ -817,6 +818,7 @@ function renderAjustes() {
       ocasiones: c.ocasiones.map(function (o) { return Object.assign({}, o); }),
       categorias: c.categorias.map(function (o) { return Object.assign({}, o); }),
       autorizados: c.autorizados.slice(),
+      contactoAdmin: c.contactoAdmin || '',
     };
   }
   var A = S.ajustes;
@@ -877,14 +879,8 @@ function renderAjustes() {
       '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar categorías</button>' +
     '</div>' +
 
-    '<h2>Personas con acceso al panel</h2><div class="tarjeta-form">' +
-      '<p class="ayuda" style="margin-top:0">Correos de Gmail que pueden entrar aquí. Tu correo siempre se queda.</p>' +
-      A.autorizados.map(function (correo, i) {
-        return '<div class="fila-editable"><input class="entrada" type="email" inputmode="email" data-lista="autorizados" data-i="' + i + '" value="' + esc(correo) + '" aria-label="Correo" placeholder="correo@gmail.com">' +
-          '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="autorizados" data-i="' + i + '" aria-label="Quitar"' + (correo === S.datos.correo ? ' disabled' : '') + '>' + ico('basura') + '</button></div>';
-      }).join('') +
-      '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="autorizados">+ Agregar persona</button>' +
-      '<div style="height:14px"></div><button type="button" class="boton boton-principal" data-accion="guardar-listas">' + ico('check') + 'Guardar personas</button>' +
+    '<h2>Personas con acceso al panel</h2><div class="tarjeta-form" id="personas">' +
+      (S.datos.esAdministrador ? personasEditables(A) : personasSoloLectura(c)) +
     '</div>' +
 
     '<h2>Tener el panel en tu celular</h2><div class="tarjeta-form">' +
@@ -899,6 +895,40 @@ function productosDeOcasion(id) {
   return S.datos.productos.filter(function (p) { return p.disponible && p.ocasiones.indexOf(id) >= 0; }).length;
 }
 
+/** Quien administra: puede agregar y quitar personas (se les comparte o retira la hoja). */
+function personasEditables(A) {
+  return '<p class="ayuda" style="margin-top:0">Correos de Google (Gmail) que pueden entrar aquí. Al guardar, a cada persona nueva ' +
+      'se le comparte la hoja del catálogo y Google le manda un correo de aviso; a quien quites, se le retira. Tu correo siempre se queda.</p>' +
+    A.autorizados.map(function (correo, i) {
+      return '<div class="fila-editable"><input class="entrada" type="email" inputmode="email" data-lista="autorizados" data-i="' + i + '" value="' + esc(correo) + '" aria-label="Correo" placeholder="correo@gmail.com">' +
+        '<button type="button" class="boton-icono peligro" data-accion="quitar-fila" data-lista="autorizados" data-i="' + i + '" aria-label="Quitar"' + (correo === S.datos.correo ? ' disabled' : '') + '>' + ico('basura') + '</button></div>';
+    }).join('') +
+    '<button type="button" class="agregar-fila" data-accion="agregar-fila" data-lista="autorizados">+ Agregar persona</button>' +
+    '<div class="campo" style="margin-top:18px"><label for="a-contactoAdmin">A quién avisar si alguien no puede entrar</label>' +
+      '<input class="entrada" id="a-contactoAdmin" data-lista-simple="contactoAdmin" value="' + esc(A.contactoAdmin) + '" placeholder="Ej. Jesús, WhatsApp 712 000 0000">' +
+      '<p class="nota-campo">Lo ve una persona autorizada que todavía no tiene la hoja compartida.</p></div>' +
+    resultadoAccesosHtml() +
+    '<button type="button" class="boton boton-principal" data-accion="guardar-personas">' + ico('check') + 'Guardar personas</button>';
+}
+
+/** Las demás cuentas: ven la lista pero no la pueden cambiar. */
+function personasSoloLectura(c) {
+  return '<ul class="lista-correos">' + c.autorizados.map(function (correo) { return '<li>' + esc(correo) + '</li>'; }).join('') + '</ul>' +
+    '<p class="aviso-fijo">Solo quien administra el catálogo puede agregar personas.' +
+    (c.contactoAdmin ? ' Si necesitas agregar a alguien, avísale a ' + esc(c.contactoAdmin) + '.' : '') + '</p>';
+}
+
+/** Resultado del último guardado de personas: se queda a la vista (el aviso flotante se va solo). */
+function resultadoAccesosHtml() {
+  var r = S.resultadoAccesos;
+  if (!r) return '';
+  var lineas = [];
+  r.compartidos.forEach(function (x) { lineas.push('<li class="ok">✓ Se le compartió la hoja a <b>' + esc(x) + '</b>. Google le mandó un correo de aviso.</li>'); });
+  r.quitados.forEach(function (x) { lineas.push('<li class="ok">✓ Se le quitó el acceso a <b>' + esc(x) + '</b>.</li>'); });
+  r.fallidos.forEach(function (f) { lineas.push('<li class="mal">✗ <b>' + esc(f.correo) + '</b>: ' + esc(f.motivo) + '. No quedó en la lista.</li>'); });
+  return lineas.length ? '<ul class="resultado-accesos" role="status">' + lineas.join('') + '</ul>' : '';
+}
+
 function leerAjustesContacto() {
   var r = {};
   Array.prototype.forEach.call(vista.querySelectorAll('[data-ajuste]'), function (el) { r[el.dataset.ajuste] = el.value.trim(); });
@@ -907,10 +937,17 @@ function leerAjustesContacto() {
 
 async function guardarAjustes(datos, mensaje) {
   try {
-    await accion('Guardando…', 'panelGuardarConfig', datos);
+    var r = await accion('Guardando…', 'panelGuardarConfig', datos);
     S.ajustes = null;
+    S.resultadoAccesos = r && r.accesos ? r.accesos : null;
     render();
-    avisar(mensaje || 'Ajustes guardados');
+    if (S.resultadoAccesos && S.resultadoAccesos.fallidos.length) {
+      avisar('No se pudo compartir la hoja con ' + S.resultadoAccesos.fallidos.map(function (f) { return f.correo; }).join(', ') + '. Revisa el detalle abajo.', 'error');
+      var caja = document.querySelector('.resultado-accesos');
+      if (caja) caja.scrollIntoView({ block: 'center' });
+    } else {
+      avisar(mensaje || 'Ajustes guardados');
+    }
   } catch (err) { avisar(err.message, 'error'); }
 }
 
@@ -1030,8 +1067,14 @@ document.addEventListener('click', async function (e) {
         return guardarAjustes({
           ocasiones: A.ocasiones.filter(function (o) { return o.nombre.trim(); }).map(function (o) { return { id: o.id || crearId(o.nombre), emoji: o.emoji, nombre: o.nombre.trim() }; }),
           categorias: A.categorias.map(function (o) { return { id: o.id || crearId(o.nombre), nombre: o.nombre.trim(), tipo: o.tipo }; }),
-          autorizados: A.autorizados.filter(function (x) { return x.trim(); }),
         }, 'Listo, guardado');
+      }
+      case 'guardar-personas': {
+        var P = S.ajustes;
+        return guardarAjustes({
+          autorizados: P.autorizados.filter(function (x) { return x.trim(); }),
+          contactoAdmin: P.contactoAdmin,
+        }, 'Personas guardadas');
       }
     }
   } catch (err) {
@@ -1042,6 +1085,7 @@ document.addEventListener('click', async function (e) {
 document.addEventListener('input', function (e) {
   var el = e.target;
   if (el.id === 'buscar') { S.busqueda = el.value; renderResultados(); return; }
+  if (el.dataset.listaSimple && S.ajustes) { S.ajustes[el.dataset.listaSimple] = el.value; return; }
   if (el.dataset.lista && S.ajustes) {
     var lista = S.ajustes[el.dataset.lista];
     if (el.dataset.prop) lista[Number(el.dataset.i)][el.dataset.prop] = el.value; else lista[Number(el.dataset.i)] = el.value;
