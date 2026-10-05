@@ -15,7 +15,7 @@ Costo de operación: **$0**. No hay servidores ni mensualidades.
 | Catálogo público | GitHub Pages (este repositorio) |
 | Datos | Hoja de Google Sheets de la dueña (pestañas Productos, Paquetes, Configuración) |
 | Fotos | Carpeta de su Google Drive |
-| Panel y API de datos | Google Apps Script ligado a la hoja ([`apps-script/`](apps-script/)) |
+| Panel y API de datos | Proyecto de Google Apps Script independiente, no ligado a la hoja ([`apps-script/`](apps-script/)) |
 
 En este repositorio no hay llaves ni datos privados. Solo quedan las URL públicas de la API, que entrega lo mismo que ya muestra el catálogo, y del panel, que pide iniciar sesión con un correo autorizado.
 

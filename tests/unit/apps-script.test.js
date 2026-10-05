@@ -28,7 +28,7 @@ describe('instalación', () => {
     const carpeta = gs.__simulador.archivos[config.carpetaFotos];
     assert.equal(carpeta.tipo, 'application/vnd.google-apps.folder');
     assert.equal(carpeta.compartido, false, 'la carpeta no se comparte; solo cada foto');
-    assert.match(gs.__simulador.estado.ultimoAviso, /Listo/, 'avisa con toast, sin alertas que bloqueen');
+    assert.match(gs.__simulador.estado.ultimoAviso, /Listo\. La hoja está preparada: https:\/\/docs\.google\.com/, 'avisa en el registro, sin alertas que bloqueen');
   });
 
   test('repetirla no duplica pestañas, renglones, carpetas ni ejemplos', () => {
@@ -49,15 +49,72 @@ describe('instalación', () => {
 
   test('si se corta a medias, volver a ejecutarla continúa donde se quedó', () => {
     const gs = cargarCodigo();
-    const { estado, libro, archivos } = gs.__simulador;
+    const { estado, archivos } = gs.__simulador;
     estado.fallas.crearCarpeta = 1; // se corta justo al crear la carpeta
     assert.throws(() => gs.enEditor((g) => g.instalar()), /Falla simulada/);
-    assert.ok(libro.getSheetByName('Configuración'), 'lo anterior al corte ya quedó');
+    assert.ok(gs.__simulador.libro.getSheetByName('Configuración'), 'lo anterior al corte ya quedó');
     gs.enEditor((g) => g.instalar());
     const carpetas = Object.values(archivos).filter((a) => a.tipo === 'application/vnd.google-apps.folder');
     assert.equal(carpetas.length, 1);
     assert.equal(gs.leerConfigCruda_().carpetaFotos, carpetas[0].id);
-    assert.equal(libro.getSheetByName('Configuración').getLastRow(), 1 + 17);
+    assert.equal(gs.__simulador.libro.getSheetByName('Configuración').getLastRow(), 1 + 17);
+    assert.equal(Object.keys(gs.__simulador.libros).length, 1, 'una sola hoja');
+  });
+
+  test('crea su propia hoja (proyecto independiente), guarda su ID y la marca con el proyecto', () => {
+    const gs = cargarCodigo();
+    gs.enEditor((g) => g.instalar());
+    const id = gs.__simulador.propiedades.idHoja;
+    const hoja = gs.__simulador.archivos[id];
+    assert.equal(hoja.tipo, 'application/vnd.google-apps.spreadsheet');
+    assert.equal(hoja.nombre, 'Decorarte – Catálogo');
+    assert.deepEqual(plano(hoja.appProperties), { decorarte: 'hoja', proyecto: 'proyecto-definitivo' });
+    const carpeta = gs.__simulador.archivos[gs.leerConfigCruda_().carpetaFotos];
+    assert.deepEqual(plano(carpeta.appProperties), { decorarte: 'fotos', proyecto: 'proyecto-definitivo' });
+  });
+
+  test('si se cortó justo después de crear la hoja (sin guardar su ID), la encuentra y no crea otra', () => {
+    const gs = cargarCodigo();
+    gs.enEditor((g) => g.instalar());
+    const primera = gs.__simulador.propiedades.idHoja;
+    delete gs.__simulador.propiedades.idHoja;
+    gs.enEditor((g) => g.instalar());
+    assert.equal(gs.__simulador.propiedades.idHoja, primera);
+    assert.equal(Object.keys(gs.__simulador.libros).length, 1);
+  });
+
+  test('si la hoja guardada se mandó a la papelera, crea una nueva', () => {
+    const gs = cargarCodigo();
+    gs.enEditor((g) => g.instalar());
+    const primera = gs.__simulador.propiedades.idHoja;
+    gs.__simulador.archivos[primera].enPapelera = true;
+    gs.evaluar('libroDeEstaEjecucion_ = null');
+    gs.enEditor((g) => g.instalar());
+    assert.notEqual(gs.__simulador.propiedades.idHoja, primera);
+  });
+
+  test('convive con otra instalación en la misma cuenta: no usa ni toca su hoja ni su carpeta', () => {
+    const gs = cargarCodigo();
+    const vieja = gs.__simulador.crearInstalacionVieja('proyecto-de-prueba');
+    const antes = JSON.stringify(gs.__simulador.libros[vieja.hoja].getSheetByName('Productos')._filas);
+    gs.enEditor((g) => { g.instalar(); g.cargarEjemplos(); });
+    const nueva = gs.__simulador.propiedades.idHoja;
+    assert.notEqual(nueva, vieja.hoja, 'hoja propia aunque se llame igual');
+    assert.notEqual(gs.leerConfigCruda_().carpetaFotos, vieja.carpeta, 'carpeta propia aunque se llame igual');
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff]).toString('base64');
+    gs.panelSubirFotoProducto('p1', jpeg, 'image/jpeg', 'x');
+    assert.equal(JSON.stringify(gs.__simulador.libros[vieja.hoja].getSheetByName('Productos')._filas), antes, 'la hoja vieja no cambió');
+    assert.ok(!Object.values(gs.__simulador.archivos).some((a) => a.carpeta === vieja.carpeta), 'ninguna foto en la carpeta vieja');
+    assert.equal(gs.__simulador.libros[vieja.hoja]._editores.size, 0, 'a la hoja vieja no se le compartió nada');
+  });
+
+  test('dondeEstaTodo muestra la hoja, la carpeta y el proyecto de esta instalación', () => {
+    const gs = conEjemplos();
+    gs.enEditor((g) => g.dondeEstaTodo());
+    const aviso = gs.__simulador.estado.ultimoAviso;
+    assert.match(aviso, /Proyecto de Apps Script: proyecto-definitivo/);
+    assert.match(aviso, new RegExp('Hoja: https://docs.google.com/spreadsheets/d/' + gs.__simulador.propiedades.idHoja));
+    assert.match(aviso, /Carpeta de fotos de quien administra: https:\/\/drive\.google\.com\/drive\/folders\//);
   });
 
   test('si la carpeta se creó pero no se anotó, la encuentra en vez de crear otra', () => {
@@ -139,14 +196,10 @@ describe('implementación API: solo JSON', () => {
     assert.equal(Object.values(gs.__simulador.archivos).filter((a) => a.tipo === 'image/jpeg').length, 0, 'no se subió ninguna foto');
   });
 
-  test('onEdit no se puede disparar desde fuera con un objeto inventado', () => {
+  test('ya no hay menú ni disparadores de la hoja que se puedan llamar desde fuera', () => {
     const gs = conEjemplos();
-    const version = gs.versionDatos_();
-    gs.enApi((api) => api.onEdit({ range: { getSheet: 'no es función' } }));
-    gs.enApi((api) => api.onEdit());
-    assert.equal(gs.versionDatos_(), version);
-    gs.onEdit({ range: { getSheet() {} } }); // una edición real sí cuenta
-    assert.notEqual(gs.versionDatos_(), version);
+    for (const fn of ['onOpen', 'onEdit']) assert.equal(typeof gs[fn], 'undefined', fn);
+    assert.throws(() => gs.enApi((api) => api.publicarCambios()), /Solo quien administra/);
   });
 
   test('la API publica los datos con el mismo formato que la demo', () => {
@@ -204,7 +257,7 @@ describe('caché: los cambios se ven al momento', () => {
     hoja._filas[1][1] = 'Cambiado a mano sin avisar';
     assert.equal(gs.api().productos.find((x) => x.id === 'p1').precio, 700);
     assert.equal(gs.api().productos[0].nombre, respaldo, 'servido desde caché');
-    gs.onEdit({ range: { getSheet() {} } }); // editar la hoja a mano invalida la caché
+    gs.enEditor((g) => g.publicarCambios()); // tras editar la hoja a mano: publicarCambios
     assert.equal(gs.api().productos[0].nombre, 'Cambiado a mano sin avisar');
   });
 
@@ -461,13 +514,13 @@ describe('personas con acceso: compartir la hoja', () => {
     assert.doesNotThrow(() => gs.panelCargar());
   });
 
-  test('la copia no se desfasa: guardado, instalar y edición a mano de la hoja', () => {
+  test('la copia no se desfasa: guardado, publicarCambios, instalar y al abrir el panel', () => {
     const gs = conEjemplos();
     gs.panelGuardarConfig({ autorizados: ['duena@gmail.com', 'a@gmail.com'], contactoAdmin: 'Jesús' });
     assert.deepEqual(copia(gs), { autorizados: ['duena@gmail.com', 'a@gmail.com'], contacto: 'Jesús' });
-    // Edición a mano en la hoja (con el disparador onEdit)
+    // Edición a mano en la hoja, y después publicarCambios
     gs.guardarClavesConfig_({ autorizados: 'duena@gmail.com\nb@gmail.com', contactoAdmin: 'Jesús, 712 334 4128' });
-    gs.onEdit({ range: { getSheet: () => ({ getName: () => 'Configuración' }) } });
+    gs.enEditor((g) => g.publicarCambios());
     assert.deepEqual(copia(gs), { autorizados: ['duena@gmail.com', 'b@gmail.com'], contacto: 'Jesús, 712 334 4128' });
     // instalar comparte con quien esté en la lista y deja la copia al día
     gs.__simulador.propiedades.copiaAutorizados = '[]';

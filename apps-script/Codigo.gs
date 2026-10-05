@@ -1,6 +1,10 @@
 /**
  * Decorarte · Panel de administración y datos del catálogo.
- * Google Apps Script ligado a la hoja de cálculo de la dueña.
+ * Proyecto de Google Apps Script INDEPENDIENTE (no ligado a la hoja): quien edita la hoja no ve este código.
+ * "instalar" crea la hoja "Decorarte – Catálogo" y guarda su ID; desde entonces todo la abre por ese ID.
+ *
+ * Varias instalaciones pueden convivir en la misma cuenta de Google: cada proyecto marca su hoja y su
+ * carpeta de fotos con su propio ID de proyecto y nunca usa las de otro, aunque se llamen igual.
  *
  * El mismo proyecto se publica dos veces (ver INSTALACION.md). Cada implementación queda fijada
  * a una versión del código donde Implementacion.gs dice qué es:
@@ -18,8 +22,10 @@ const HOJA_PAQUETES = 'Paquetes';
 const HOJA_CONFIG = 'Configuración';
 const URL_CATALOGO = 'https://tapqr-temascalcingo.github.io/decorarte-catalogo/';
 const URL_LOGO = URL_CATALOGO + 'img/logo-192.png';
+const NOMBRE_HOJA = 'Decorarte – Catálogo';
 const NOMBRE_CARPETA = 'Decorarte Catálogo – Fotos';
 const TIPO_CARPETA = 'application/vnd.google-apps.folder';
+const TIPO_HOJA = 'application/vnd.google-apps.spreadsheet';
 const CLAVE_CACHE = 'catalogo-v2';
 const DURACION_CACHE = 21600; // 6 h, el máximo. Cada cambio guardado usa una clave nueva.
 const TIPOS_PRECIO = ['fijo', 'desde', 'consultar'];
@@ -160,30 +166,33 @@ function paginaSinAcceso_(correo) {
  *  Menú en la hoja e instalación
  * ===================================================================== */
 
-function onOpen() {
-  try {
-    SpreadsheetApp.getUi().createMenu('Decorarte')
-      .addItem('Preparar hoja (instalar)', 'instalar')
-      .addItem('Cargar productos de ejemplo', 'cargarEjemplos')
-      .addItem('Publicar cambios hechos a mano en la hoja', 'publicarCambios')
-      .addToUi();
-  } catch (e) { /* sin interfaz disponible: el menú es solo una comodidad */ }
-}
+/*
+ * No hay menú dentro de la hoja ni actualización instantánea al editarla a mano: un proyecto independiente
+ * no recibe esos avisos de la hoja sin pedir el permiso de "ejecutarse cuando no estás presente".
+ * Lo que se cambia desde el panel se ve al momento, como siempre. Si se edita la hoja a mano,
+ * se ejecuta publicarCambios desde el editor (o se espera a que venza la caché, máximo 6 horas).
+ */
 
-/** Si alguien edita la hoja a mano, el catálogo se actualiza al momento. */
-function onEdit(e) {
-  // Solo para ediciones reales en la hoja: un objeto armado desde fuera no trae funciones.
-  if (!e || !e.range || typeof e.range.getSheet !== 'function') return;
-  nuevaVersionDatos_();
-  try {
-    if (e.range.getSheet().getName() === HOJA_CONFIG) actualizarCopiaDeAccesos_(leerConfigCruda_());
-  } catch (err) { /* se actualiza en la siguiente apertura del panel */ }
-}
-
+/** Después de editar la hoja a mano: el catálogo muestra los datos actuales. Solo quien administra. */
 function publicarCambios() {
   verificarDuena_();
+  actualizarCopiaDeAccesos_(leerConfigCruda_());
   refrescarCache_();
   avisar_('Listo: el catálogo ya muestra la información actual de la hoja.');
+}
+
+/** Muestra en el registro dónde está todo de ESTA instalación (para distinguirla de otras). */
+function dondeEstaTodo() {
+  verificarDuena_();
+  const props = PropertiesService.getScriptProperties();
+  const idHoja = props.getProperty('idHoja');
+  const carpeta = leerConfigCruda_().carpetaFotos;
+  avisar_([
+    'Proyecto de Apps Script: ' + ScriptApp.getScriptId(),
+    'Hoja: ' + (idHoja ? libro_().getUrl() : '(todavía no; ejecuta instalar)'),
+    'Carpeta de fotos de quien administra: ' + (carpeta ? 'https://drive.google.com/drive/folders/' + carpeta : '(todavía no)'),
+    'Administra: ' + propietario_(),
+  ].join('\n'));
 }
 
 /**
@@ -194,23 +203,59 @@ function publicarCambios() {
 function instalar() {
   verificarDuena_();
   const props = PropertiesService.getScriptProperties();
-  const libro = libro_();
   if (!props.getProperty('propietario')) props.setProperty('propietario', correoActual_());
-  props.setProperty('idHoja', libro.getId());
-  registrar_('1/4 Pestañas');
+  registrar_('1/5 Hoja del catálogo');
+  const libro = hojaDeEstaInstalacion_();
+  registrar_('2/5 Pestañas');
   prepararPestanas_(libro);
-  registrar_('2/4 Configuración');
+  registrar_('3/5 Configuración');
   prepararConfig_(libro);
-  registrar_('3/4 Carpeta de fotos');
+  registrar_('4/5 Carpeta de fotos');
   carpetaFotos_();
-  registrar_('4/4 Accesos y publicar');
+  registrar_('5/5 Accesos y publicar');
   const accesos = sincronizarAccesos_(lineas_(leerConfigCruda_().autorizados), []);
   actualizarCopiaDeAccesos_(leerConfigCruda_());
   const sobrante = libro.getSheetByName('Hoja 1') || libro.getSheetByName('Sheet1');
   if (sobrante && libro.getSheets().length > 1 && sobrante.getLastRow() === 0) libro.deleteSheet(sobrante);
   refrescarCache_();
-  avisar_('Listo. La hoja está preparada. Sigue con el paso "Publicar" de la guía de instalación.' +
-    (accesos.fallidos.length ? ' No se pudo compartir con: ' + accesos.fallidos.map((f) => f.correo).join(', ') + '.' : ''));
+  avisar_('Listo. La hoja está preparada: ' + libro.getUrl() +
+    (accesos.fallidos.length ? '\nNo se pudo compartir con: ' + accesos.fallidos.map((f) => f.correo).join(', ') + '.' : ''));
+}
+
+/**
+ * La hoja de ESTA instalación. Orden: la guardada en idHoja (si sigue existiendo y no está en la papelera);
+ * si no, la que este proyecto ya creó (marcada con su ID de proyecto); si no, una nueva.
+ * Nunca usa una hoja de otra instalación aunque se llame igual. El ID se guarda en cuanto existe la hoja.
+ */
+function hojaDeEstaInstalacion_() {
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty('idHoja');
+  if (!archivoDrive_(id)) {
+    id = buscarArchivoDelProyecto_(TIPO_HOJA, 'hoja');
+    if (!id) {
+      id = Drive.Files.create({ name: NOMBRE_HOJA, mimeType: TIPO_HOJA, appProperties: marcaDelProyecto_('hoja') }).id;
+    }
+    props.setProperty('idHoja', id);
+    libroDeEstaEjecucion_ = null;
+  }
+  return libro_();
+}
+
+/** Marca que distingue los archivos de esta instalación de los de cualquier otra. */
+function marcaDelProyecto_(tipo) {
+  return { decorarte: tipo, proyecto: ScriptApp.getScriptId() };
+}
+
+/** Archivo de este proyecto y de esta cuenta, por tipo ('hoja' o 'fotos'), que no esté en la papelera. */
+function buscarArchivoDelProyecto_(tipoMime, tipo) {
+  const r = Drive.Files.list({
+    q: `mimeType='${tipoMime}' and trashed=false and 'me' in owners` +
+      ` and appProperties has { key='decorarte' and value='${tipo}' }` +
+      ` and appProperties has { key='proyecto' and value='${ScriptApp.getScriptId()}' }`,
+    fields: 'files(id)',
+    pageSize: 1,
+  });
+  return r.files && r.files.length ? r.files[0].id : '';
 }
 
 function prepararPestanas_(libro) {
@@ -271,9 +316,9 @@ function cargarEjemplos() {
 }
 
 /** Aviso que no detiene la ejecución (una alerta esperaría a que alguien toque "Aceptar"). */
+/** Aviso en el registro de ejecución del editor (no hay hoja abierta donde mostrarlo). */
 function avisar_(mensaje) {
   Logger.log(mensaje);
-  try { SpreadsheetApp.getActiveSpreadsheet().toast(mensaje, 'Decorarte', 10); } catch (e) { /* sin hoja abierta */ }
 }
 
 function registrar_(paso) {
@@ -367,7 +412,7 @@ function sincronizarAccesos_(nuevos, anteriores) {
   const protegidos = [propietario_(), correoActual_()].filter(Boolean);
   const r = { compartidos: [], quitados: [], fallidos: [] };
   nuevos.map((x) => x.toLowerCase()).forEach((correo) => {
-    if (conHoja.indexOf(correo) >= 0) return;
+    if (conHoja.indexOf(correo) >= 0 || protegidos.indexOf(correo) >= 0) return;
     try {
       libro.addEditor(correo);
       r.compartidos.push(correo);
@@ -411,12 +456,14 @@ function verificarDuena_() {
  *  Lectura de la hoja
  * ===================================================================== */
 
+let libroDeEstaEjecucion_ = null;
+
 function libro_() {
-  const activo = SpreadsheetApp.getActiveSpreadsheet();
-  if (activo) return activo;
+  if (libroDeEstaEjecucion_) return libroDeEstaEjecucion_;
   const id = PropertiesService.getScriptProperties().getProperty('idHoja');
   if (!id) throw new Error('Falta ejecutar "instalar" desde el editor de Apps Script.');
-  return SpreadsheetApp.openById(id);
+  libroDeEstaEjecucion_ = SpreadsheetApp.openById(id);
+  return libroDeEstaEjecucion_;
 }
 
 function hoja_(nombre) {
@@ -753,14 +800,6 @@ function archivoDrive_(id) {
   }
 }
 
-function buscarCarpetaDeLaApp_() {
-  const r = Drive.Files.list({
-    q: `mimeType='${TIPO_CARPETA}' and trashed=false and 'me' in owners and appProperties has { key='decorarte' and value='fotos' }`,
-    fields: 'files(id)',
-    pageSize: 1,
-  });
-  return r.files && r.files.length ? r.files[0].id : '';
-}
 
 /** ID de la carpeta de fotos de quien está usando el panel. La busca antes de crear una nueva. */
 function carpetaFotos_() {
@@ -770,9 +809,9 @@ function carpetaFotos_() {
   const usuario = PropertiesService.getUserProperties();
   let id = usuario.getProperty('carpetaFotos');
   if (!archivoDrive_(id)) {
-    id = buscarCarpetaDeLaApp_();
+    id = buscarArchivoDelProyecto_(TIPO_CARPETA, 'fotos');
     if (!id) {
-      id = Drive.Files.create({ name: NOMBRE_CARPETA, mimeType: TIPO_CARPETA, appProperties: { decorarte: 'fotos' } }).id;
+      id = Drive.Files.create({ name: NOMBRE_CARPETA, mimeType: TIPO_CARPETA, appProperties: marcaDelProyecto_('fotos') }).id;
     }
     usuario.setProperty('carpetaFotos', id);
   }
@@ -789,7 +828,7 @@ function subirFotoADrive_(base64, tipo, nombre) {
   const nombreArchivo = (crearId_(nombre) || 'foto') + '-' +
     Utilities.formatDate(new Date(), 'America/Mexico_City', 'yyyyMMdd-HHmmss') + '.' + extension;
   const archivo = Drive.Files.create(
-    { name: nombreArchivo, parents: [carpetaFotos_()], appProperties: { decorarte: 'foto' } },
+    { name: nombreArchivo, parents: [carpetaFotos_()], appProperties: marcaDelProyecto_('foto') },
     Utilities.newBlob(bytes, tipo, nombreArchivo),
   );
   Drive.Permissions.create({ role: 'reader', type: 'anyone' }, archivo.id);

@@ -1,275 +1,300 @@
 # Instalación del catálogo Decorarte
 
-Guía para dejar funcionando el catálogo **en la cuenta de Google de la agencia**, que lo administra como servicio con
-mantenimiento. La dueña de la tienda **no recibe una cuenta**: entra al panel con **su propio correo de Google**, como
-persona con acceso. Se hace una sola vez, de preferencia desde una computadora. Tiempo aproximado: 30 minutos.
+Guía para instalar el catálogo **en la cuenta de Google de la agencia**, que lo administra como servicio con mantenimiento.
+La dueña de la tienda entra al panel con **su propio Gmail**, como persona con acceso.
 
-Al terminar tendrás:
+El código vive en un **proyecto de Apps Script independiente** (no ligado a la hoja). La dueña puede usar el panel y tiene la
+hoja compartida, pero **no puede ver ni editar el código**.
 
-- Una **hoja de Google Sheets** (en el Drive de la agencia) con tres pestañas: Productos, Paquetes y Configuración. Es el respaldo de toda la información.
-- El **panel de administración**, que la dueña abre desde un ícono en su celular con su propio Gmail.
-- El **catálogo público** en https://tapqr-temascalcingo.github.io/decorarte-catalogo/ mostrando sus productos reales.
-
-Todo es gratis: no hay servidores ni mensualidades.
+Sigue los pasos **en orden y de corrido**, desde una computadora. Tiempo aproximado: 30 minutos.
 
 ---
 
-## Cómo está armado
+## Antes de empezar: las dos palabras que más confunden
 
-```
- Clientes ──► Catálogo (GitHub Pages) ──pide los datos──► "API catálogo" (Apps Script) ──lee──► Hoja (Drive de la agencia)
-                                                                                                   ▲
- Dueña (su Gmail) ─► Ícono en su celular ─► "Panel" (Apps Script, solo personas con acceso) ─escribe┘
-```
+En el editor de Apps Script, el botón azul **Implementar** (arriba a la derecha) tiene tres opciones. Solo usarás dos:
 
-**Quién es quién**
-
-| Persona | Cuenta | Qué puede hacer |
+| Opción | Cuándo se usa | Qué hace |
 |---|---|---|
-| **Quien administra** (la agencia) | La cuenta que ejecuta `instalar` | Todo: código, implementaciones, y **agregar o quitar personas con acceso**. |
-| **La dueña** | Su propio Gmail | Usar el panel: productos, fotos, paquetes y ajustes del catálogo. Ve la lista de personas con acceso, pero no la puede cambiar. |
+| **Nueva implementación** | **Solo dos veces en toda la vida del catálogo**: una para **"API catálogo"** y otra para **"Panel"** (pasos 22 y 26). | Crea una dirección (URL) **nueva**. Si la usas de más, tendrás direcciones de sobra que no sirven. |
+| **Gestionar implementaciones** | **Siempre después**, cada vez que actualices el código. | Ahí se elige la implementación, se toca el **lápiz ✏️**, se escoge **Versión → Nueva versión** y **Implementar**. La dirección **no cambia**. |
 
-El mismo proyecto de Apps Script se publica **dos veces**. Cada publicación ("implementación") queda fijada a una versión
-del código en la que el archivo `Implementacion.gs` dice qué es:
+Dentro de **Gestionar implementaciones** también hay un botón **Archivar** (ícono de caja). **Archivar apaga esa dirección**:
+el catálogo o el panel que la usen dejan de funcionar. No lo toques salvo para borrar una instalación vieja.
 
-| Implementación | `Implementacion.gs` | Ejecutar como | Quién tiene acceso | Qué hace |
-|---|---|---|---|---|
-| **API catálogo** | `'api'` | Yo (la cuenta de la agencia) | Cualquier persona | Solo entrega el JSON público del catálogo. Nunca muestra páginas ni acepta cambios, aunque se abra sin `?api` o con sesión. |
-| **Panel** | `'panel'` | Usuario que accede a la aplicación web | Cualquier usuario con cuenta de Google | Muestra el panel solo a las personas con acceso. |
+El archivo **`Implementacion.gs`** tiene una sola línea que dice qué es cada publicación:
 
-Si `Implementacion.gs` falta o dice cualquier cosa distinta de `'panel'`, el código se comporta como **API** (lo más cerrado).
-`instalar`, `cargarEjemplos` y `publicarCambios` solo funcionan para la cuenta que instaló.
-
-**Por qué la hoja se comparte con la dueña:** el panel corre con la cuenta de quien entra, para saber quién es y dejar pasar
-solo a las personas con acceso. Por eso cada persona necesita la hoja compartida como **Editor**. El panel lo hace solo:
-al agregar a alguien en **Ajustes → Personas con acceso** se le comparte la hoja, y al quitarlo se le retira.
-
-En el repositorio público solo quedan las dos direcciones `/exec`, que no son secretas. **No hay llaves ni contraseñas en el repositorio.**
-
-### Permisos que pide
-
-Cada cuenta que use el panel (la agencia al instalar, y la dueña la primera vez que entra) ve esta lista. El texto exacto
-en español puede variar un poco según el idioma de la cuenta:
-
-| Lo que se ve al autorizar | Original en inglés | Para qué |
-|---|---|---|
-| **Ver, editar, crear y eliminar todas tus hojas de cálculo de Hojas de cálculo de Google** | See, edit, create, and delete all your Google Sheets spreadsheets | Leer y guardar productos en la hoja del catálogo, y compartirla con las personas con acceso. |
-| **Ver, editar, crear y borrar solo los archivos específicos de Google Drive que uses con esta app** | See, edit, create, and delete only the specific Google Drive files you use with this app | Crear la carpeta de fotos y subir las fotos. **No** puede ver ningún otro archivo de Drive. |
-| **Ver la dirección de correo electrónico principal de tu Cuenta de Google** | See your primary Google Account email address | Saber quién entra al panel para dejar pasar solo a las personas con acceso. |
-
-No se pide "ver, editar y borrar todos tus archivos de Drive" ni "conectarse a un servicio externo".
-
-> **¿Por qué el de hojas de cálculo dice "todas"?** Existe un permiso más estrecho (`spreadsheets.currentonly`), pero está
-> pensado para menús y barras laterales dentro de la hoja. No hay garantía de que funcione cuando el código corre como
-> aplicación web, que es como corren la API y el panel. En la práctica el código solo abre la hoja del catálogo.
+- `const IMPLEMENTACION = 'api';` → para **API catálogo**. Es el valor que debe quedar guardado siempre al terminar.
+- `const IMPLEMENTACION = 'panel';` → solo mientras publicas el **Panel**.
 
 ---
 
-## Paso 1. Crear la hoja
+## Si ya tienes una instalación de prueba en la misma cuenta
 
-1. Entra a Google **con la cuenta de la agencia**. Si hay varias cuentas abiertas en el navegador, usa una ventana de incógnito y entra solo con esa.
-2. Abre https://sheets.new. Se crea una hoja en blanco.
-3. Arriba a la izquierda, cambia el nombre "Hoja de cálculo sin título" por **Decorarte – Catálogo**.
+La instalación nueva **no usa ni modifica** nada de la de prueba: crea su propia hoja y su propia carpeta de fotos, marcadas con
+el número de su proyecto, aunque se llamen igual. Para no confundirlas tú, **antes de empezar** cámbiales el nombre a las de
+prueba. No se rompe nada: todo se busca por número, no por nombre.
 
-## Paso 2. Abrir Apps Script
+1. En **drive.google.com**, cambia el nombre de la hoja de prueba "Decorarte – Catálogo" a **"PRUEBA – Decorarte – Catálogo"**
+   (clic derecho → **Cambiar nombre**).
+2. Igual con la carpeta de prueba "Decorarte Catálogo – Fotos" → **"PRUEBA – Decorarte Catálogo – Fotos"**.
+3. Abre la hoja de prueba → **Extensiones → Apps Script** y cambia el nombre del proyecto (arriba a la izquierda) a
+   **"Decorarte Panel – PRUEBA"**.
 
-1. En la hoja, menú **Extensiones → Apps Script**. Se abre el editor en otra pestaña.
-2. Arriba a la izquierda, cambia "Proyecto sin título" por **Decorarte Panel**.
+Cómo borrar la de prueba sin riesgo, cuando ya no la necesites: ver [Borrar la instalación de prueba](#borrar-la-instalación-de-prueba).
 
-## Paso 3. Pegar el código
+---
 
-Los archivos están en la carpeta [`apps-script/`](apps-script/) de este repositorio. Para copiar cada uno, ábrelo en GitHub y usa el botón **Copy raw file** (ícono de dos hojas).
+## Pasos
 
-1. **appsscript.json** (primero, porque activa el servicio de Drive y fija los permisos)
-   - Ve a ⚙️ **Configuración del proyecto** y marca **Mostrar el archivo de manifiesto "appsscript.json" en el editor**.
-   - Regresa al editor (ícono `< >`), abre `appsscript.json` y reemplaza todo su contenido por [`apps-script/appsscript.json`](apps-script/appsscript.json).
-   - Guarda. En la lista de la izquierda, bajo **Servicios**, debe aparecer **Drive**.
-2. **Archivos de código.** `Código.gs` ya existe: bórrale todo y pega [`Codigo.gs`](apps-script/Codigo.gs). Crea los otros dos con **＋ → Secuencia de comandos**, con el nombre exacto y sin `.gs`:
+### Crear el proyecto y pegar el código
 
-   | Nombre | Contenido |
-   |---|---|
-   | `Código` (ya existe) | [`apps-script/Codigo.gs`](apps-script/Codigo.gs) |
-   | `Implementacion` | [`apps-script/Implementacion.gs`](apps-script/Implementacion.gs) |
-   | `Ejemplos` | [`apps-script/Ejemplos.gs`](apps-script/Ejemplos.gs) |
+1. Entra a **https://script.google.com** con la cuenta de la agencia. Si hay varias cuentas abiertas, usa una ventana de incógnito y entra solo con esa.
+2. Toca **＋ Nuevo proyecto**.
+3. Arriba a la izquierda, cambia "Proyecto sin título" por **Decorarte Panel**. Este nombre es el que verá la dueña en la pantalla de permisos.
+4. En la barra izquierda toca ⚙️ **Configuración del proyecto** y marca **Mostrar el archivo de manifiesto "appsscript.json" en el editor**.
+5. Regresa al editor (ícono `< >`). Abre **`appsscript.json`**, borra todo y pega [`apps-script/appsscript.json`](apps-script/appsscript.json). Guarda (💾 o **Ctrl + S**).
+   En la barra izquierda, bajo **Servicios**, debe aparecer **Drive**.
+6. Abre **`Código.gs`**, borra todo y pega [`apps-script/Codigo.gs`](apps-script/Codigo.gs).
+7. Toca **＋ → Secuencia de comandos**, ponle de nombre **`Implementacion`** (sin `.gs`) y pega [`apps-script/Implementacion.gs`](apps-script/Implementacion.gs).
+   Debe decir `const IMPLEMENTACION = 'api';`.
+8. **＋ → Secuencia de comandos** → **`Ejemplos`** → pega [`apps-script/Ejemplos.gs`](apps-script/Ejemplos.gs).
+9. **＋ → HTML** → **`Panel`** (sin `.html`) → borra lo que trae y pega [`apps-script/Panel.html`](apps-script/Panel.html).
+10. **＋ → HTML** → **`PanelEstilos`** → pega [`apps-script/PanelEstilos.html`](apps-script/PanelEstilos.html).
+11. **＋ → HTML** → **`PanelApp`** → pega [`apps-script/PanelApp.html`](apps-script/PanelApp.html).
+12. **＋ → HTML** → **`Fotos`** → pega [`apps-script/Fotos.html`](apps-script/Fotos.html).
+13. Guarda. A la izquierda deben verse 8 archivos: `appsscript.json`, `Código.gs`, `Implementacion.gs`, `Ejemplos.gs`, `Panel.html`, `PanelEstilos.html`, `PanelApp.html` y `Fotos.html`.
 
-3. **Archivos HTML.** Crea uno por uno con **＋ → HTML**, con el nombre **exacto y sin `.html`**. Borra lo que traen y pega:
+> Para copiar cada archivo desde GitHub: ábrelo y usa el botón **Copy raw file** (ícono de dos hojas).
 
-   | Nombre | Contenido |
-   |---|---|
-   | `Panel` | [`apps-script/Panel.html`](apps-script/Panel.html) |
-   | `PanelEstilos` | [`apps-script/PanelEstilos.html`](apps-script/PanelEstilos.html) |
-   | `PanelApp` | [`apps-script/PanelApp.html`](apps-script/PanelApp.html) |
-   | `Fotos` | [`apps-script/Fotos.html`](apps-script/Fotos.html) |
+### Crear la hoja y dar permisos
 
-4. Guarda con 💾 o con **Ctrl + S**.
+14. En la barra de arriba del editor, elige la función **`instalar`** y toca **▶ Ejecutar**.
+15. Google pide permisos:
+    1. **Revisar permisos** → elige la cuenta de la agencia.
+    2. "Google no verificó esta app" → **Configuración avanzada** → **Ir a Decorarte Panel (no seguro)**. Es normal: es una app propia, no publicada para el público.
+    3. Revisa que la lista sea la de [Permisos que pide](#permisos-que-pide) y toca **Permitir**.
+16. Abajo, en el **Registro de ejecución**, deben aparecer los pasos `1/5 … 5/5` y al final
+    **"Listo. La hoja está preparada: https://docs.google.com/spreadsheets/d/…"**.
+    **Esa es la hoja de esta instalación.** Ábrela con ese enlace y guárdalo en tus favoritos.
+    Si algo se corta a medias, vuelve a ejecutar `instalar`: continúa donde se quedó sin duplicar nada.
+17. *(Opcional)* Para empezar con los 8 productos de ejemplo, elige **`cargarEjemplos`** y **▶ Ejecutar**.
 
-## Paso 4. Preparar la hoja y dar permisos
+### Proteger la hoja
 
-1. En la barra de arriba del editor, elige la función **`instalar`** y presiona **▶ Ejecutar**.
-2. Google pide permisos:
-   1. **Revisar permisos** → elige la cuenta de la agencia.
-   2. Aparece "Google no verificó esta app". Es normal: es una app propia, no publicada para el público. Toca **Configuración avanzada → Ir a Decorarte Panel (no seguro)**.
-   3. Revisa que la lista sea la de la tabla **Permisos que pide** de arriba y toca **Permitir**.
-3. El registro de ejecución muestra los pasos `1/4 … 4/4` y termina en segundos. Revisa la hoja: ya tiene las pestañas **Productos**, **Paquetes** y **Configuración**. En el Drive de la agencia aparece la carpeta **Decorarte Catálogo – Fotos**.
-4. *(Opcional)* Para empezar con los 8 productos de ejemplo, ejecuta también **`cargarEjemplos`**.
+18. En la hoja (el enlace del paso 16), toca **Compartir** (arriba a la derecha).
+19. Toca el engrane ⚙️ de esa ventana y **desmarca** "Los editores pueden cambiar los permisos y compartir". Regresa con la flecha y toca **Listo**.
+    Así solo la agencia comparte la hoja; el panel lo hace por ti al agregar personas.
 
-> `instalar` y `cargarEjemplos` se pueden ejecutar las veces que haga falta. Si una se corta a medias, vuelve a ejecutarla:
-> continúa donde se quedó sin duplicar pestañas, renglones, carpetas ni productos. `instalar` también vuelve a compartir
-> la hoja con todas las personas de la lista y pone al día la copia de la lista que usa el panel para sus mensajes.
+### Publicar la API (una sola vez)
 
-## Paso 5. Proteger la hoja: solo la agencia comparte
+20. Abre **`Implementacion.gs`**. Debe decir exactamente:
+    ```js
+    const IMPLEMENTACION = 'api';
+    ```
+21. Guarda.
+22. **Implementar → Nueva implementación** ← *primera de las dos únicas veces*.
+    - Junto a "Seleccionar tipo" toca el engrane ⚙️ → **Aplicación web**.
+    - **Descripción:** escribe `API catálogo`.
+    - **Ejecutar como:** **Yo** (tu correo).
+    - **Quién tiene acceso:** **Cualquier persona**.
+    - Toca **Implementar** y copia la **URL de la aplicación web** (termina en `/exec`). Esta es la **URL de la API**.
+23. **Comprobación:** pega la URL de la API en una pestaña nueva, **tal cual, sin agregarle `?api`**.
+    Debe salir texto que empieza con `{"version":1,…`. Si sale una página, `Implementacion.gs` no decía `'api'`: ve a
+    [Si una dirección muestra lo que no debe](#si-una-dirección-muestra-lo-que-no-debe).
 
-En la hoja **Decorarte – Catálogo**:
+### Publicar el Panel (una sola vez)
 
-1. Toca **Compartir** (arriba a la derecha).
-2. Toca el engrane ⚙️ (**Configuración**) de esa ventana.
-3. **Desmarca** "Los editores pueden cambiar los permisos y compartir".
-4. Toca la flecha para regresar y luego **Listo**.
+24. Abre **`Implementacion.gs`** y cambia la línea a:
+    ```js
+    const IMPLEMENTACION = 'panel';
+    ```
+25. Guarda.
+26. **Implementar → Nueva implementación** ← *segunda y última vez que usas esta opción*.
+    - Tipo: **Aplicación web**.
+    - **Descripción:** escribe `Panel`.
+    - **Ejecutar como:** **Usuario que accede a la aplicación web**.
+    - **Quién tiene acceso:** **Cualquier usuario con cuenta de Google**.
+    - Toca **Implementar** y copia la URL. Esta es la **URL del Panel** (es distinta a la de la API).
+27. Abre **`Implementacion.gs`** y **regrésala** a:
+    ```js
+    const IMPLEMENTACION = 'api';
+    ```
+28. Guarda. (Las implementaciones ya quedaron fijadas a su versión; esto no les afecta.)
+29. **Comprobación:** abre otra vez la **URL de la API sin `?api`**. Debe seguir saliendo `{"version":1,…`.
+30. Abre la **URL del Panel**: debe salir **Tus productos**. (Si te pide permisos, son los mismos del paso 15.)
 
-Así, la dueña no puede compartir la hoja con nadie más. Agregar o quitar personas lo hace solo la agencia, desde el panel.
-Si alguien más intenta cambiar la lista en el panel, verá: "Solo quien administra el catálogo puede agregar personas".
+### Conectar el catálogo
 
-> **Qué puede hacer la dueña al tener la hoja como Editora:** abrir la hoja y cambiar celdas a mano, borrar pestañas
-> (se recupera con **Archivo → Historial de versiones**), y abrir **Extensiones → Apps Script**, donde **puede ver y editar
-> el código**, porque el código está ligado a la hoja. Las implementaciones publicadas no cambian solas (están fijadas a una
-> versión). **No** puede ver otros archivos del Drive de la agencia. No se pueden proteger las pestañas para que solo la
-> agencia las edite: el panel escribe con la cuenta de la dueña.
+31. Las dos URL van en el archivo [`js/config.js`](js/config.js) del repositorio:
+    ```js
+    export const CONFIG = {
+      endpoint: 'URL DE LA API (paso 22), sin ?api',
+      panel: 'URL DEL PANEL (paso 26)',
+      whatsappRespaldo: '527122319080',
+    };
+    ```
+    Mándaselas a quien mantiene el repositorio para que las cambie y publique, o edítalo en GitHub con el lápiz ✏️ y
+    **Commit changes**. No se toca nada más.
+32. Espera 1 o 2 minutos y abre **https://tapqr-temascalcingo.github.io/decorarte-catalogo/** (recarga si ya lo tenías abierto).
+    Ya no debe salir la franja de "Catálogo de demostración" y deben verse los productos de la hoja nueva.
 
-## Paso 6. Publicar la "API catálogo"
+### Agregar a la dueña
 
-1. Abre **`Implementacion.gs`** y confirma que dice exactamente:
-   ```js
-   const IMPLEMENTACION = 'api';
-   ```
-   Guarda.
-2. **Implementar → Nueva implementación** → ⚙️ **Aplicación web**:
-   - Descripción: `API catálogo`
-   - Ejecutar como: **Yo**
-   - Quién tiene acceso: **Cualquier persona**
-3. **Implementar** y copia la **URL de la aplicación web** (termina en `/exec`).
-4. **Comprobación:** abre esa URL **tal cual, sin `?api`**, en una pestaña normal (con sesión).
-   - Debe mostrar texto que empieza con `{"version":1,…`.
-   - Si muestra una página, `Implementacion.gs` no decía `'api'`: corrígelo y publica una versión nueva (ver "Actualizar el código").
+33. Abre la **URL del Panel** → **Ajustes** → **Personas con acceso al panel**.
+34. En **A quién avisar si alguien no puede entrar** escribe: `Jesús, de Agencia Digital Temas, WhatsApp 712 334 4128`.
+35. Toca **＋ Agregar persona**, escribe el **Gmail de la dueña** y toca **Guardar personas**.
+36. Debe aparecer **"✓ Se le compartió la hoja a …. Google le mandó un correo de aviso."**
+    Si aparece **"✗ … no parece ser una cuenta de Google"**, revisa el correo y vuelve a intentarlo.
 
-## Paso 7. Conectar el catálogo
-
-1. En GitHub abre [`js/config.js`](js/config.js) y toca el lápiz ✏️ (**Edit this file**).
-2. Pega la URL del paso 6 entre las comillas de `endpoint`, **sin** `?api`:
-   ```js
-   endpoint: 'https://script.google.com/macros/s/AKfy…/exec',
-   ```
-3. **Commit changes…** → **Commit changes**.
-4. Espera 1 o 2 minutos y abre https://tapqr-temascalcingo.github.io/decorarte-catalogo/. Ya no debe aparecer la franja de "Catálogo de demostración".
-
-> La demostración sigue disponible en `…/decorarte-catalogo/?demo` por si quieres enseñarla otra vez.
-
-## Paso 8. Publicar el "Panel"
-
-1. Abre **`Implementacion.gs`**, cambia la línea a:
-   ```js
-   const IMPLEMENTACION = 'panel';
-   ```
-   Guarda.
-2. **Implementar → Nueva implementación → Aplicación web**. Es una implementación **nueva**: no edites la del paso 6.
-   - Descripción: `Panel`
-   - Ejecutar como: **Usuario que accede a la aplicación web**
-   - Quién tiene acceso: **Cualquier usuario con cuenta de Google**
-3. **Implementar** y copia la URL. Es distinta a la del paso 6.
-4. **Regresa `Implementacion.gs` a `'api'` y guarda.** Las implementaciones ya quedaron fijadas a su versión, así que esto no les afecta.
-5. **Comprobación:** abre otra vez la URL de la **API** (paso 6) sin `?api`. Debe seguir mostrando `{"version":1,…`.
-6. En GitHub, edita otra vez [`js/config.js`](js/config.js) y pega la URL del panel en `panel`:
-   ```js
-   panel: 'https://script.google.com/macros/s/AKfy…otra…/exec',
-   ```
-   Haz commit.
-
-## Paso 9. Agregar a la dueña
-
-Desde la computadora, con la cuenta de la agencia:
-
-1. Abre la URL del panel (paso 8) y ve a **Ajustes → Personas con acceso al panel**.
-2. En **A quién avisar si alguien no puede entrar**, escribe el contacto de la agencia, por ejemplo:
-   `Jesús, de Agencia Digital Temas, WhatsApp 712 334 4128`. Es lo que verá una persona con acceso que todavía no tenga
-   la hoja compartida. Se cambia en este mismo lugar cuando haga falta.
-3. Toca **＋ Agregar persona**, escribe el **Gmail de la dueña** y toca **Guardar personas**.
-4. Debe aparecer: **"✓ Se le compartió la hoja a …. Google le mandó un correo de aviso."**
-   - Si aparece **"✗ … no parece ser una cuenta de Google"**, revisa el correo: debe ser una cuenta de Google (Gmail o un correo
-     con cuenta de Google). Esa persona no queda en la lista hasta que se pueda compartir.
-
-Para **quitar** a alguien: en la misma pantalla toca el bote de basura junto a su correo y **Guardar personas**. Se le retira la hoja
-y ya no puede entrar. La cuenta de la agencia nunca se puede quitar.
-
-## Paso 10. Entrega en el celular de la dueña
+### Entrega en el celular de la dueña
 
 Hazlo con ella, con su teléfono en la mano.
 
-**Antes de empezar: ¿cuántas cuentas de Google tiene en el teléfono?** Si en el navegador tiene más de una (por ejemplo,
-la personal y la del trabajo), Google suele mostrar **«No se pudo abrir el archivo»** al abrir el panel. Es una limitación
-conocida de Apps Script. En ese caso el panel se usa en **un navegador donde solo esté la cuenta con la que la agregaste**.
-Por ejemplo, si en Safari tiene otra cuenta, instala **Google Chrome** desde la App Store y usa Chrome solo para el panel,
-con esa única cuenta.
+37. Pregúntale si en el navegador de su teléfono tiene **más de una cuenta de Google**. Si sí, usa **un navegador donde solo esté
+    su Gmail** (por ejemplo, instala **Google Chrome** y usa Chrome solo para el panel). Si no, Google suele mostrar
+    «No se pudo abrir el archivo».
+38. En ese navegador abre **https://tapqr-temascalcingo.github.io/decorarte-catalogo/panel/** y agrega el acceso a la pantalla de inicio:
+    - **Chrome en iPhone:** **Compartir** (cuadro con flecha) → **Agregar a pantalla de inicio**.
+    - **Safari en iPhone:** **Compartir** → **Agregar a inicio**.
+    - **Android (Chrome):** menú **⋮** → **Agregar a la pantalla principal** (o **Instalar app**).
+39. Toca el ícono nuevo. La **primera vez** verá, en este orden:
+    1. **Iniciar sesión** (si no tenía sesión): con su Gmail.
+    2. **"Google no verificó esta app"** → **Configuración avanzada** (o **Avanzado**) → **Ir a Decorarte Panel (no seguro)**.
+    3. **"Decorarte Panel quiere acceder a tu Cuenta de Google"** → **Continuar** o **Permitir**.
+    4. **Tus productos**.
+40. Pídele que **agregue un producto con una foto de la cámara**. La primera foto crea en **su** Google Drive la carpeta
+    **Decorarte Catálogo – Fotos**. Dile que **no la borre**: ahí viven las fotos que ella sube.
+41. Enséñale el [MANUAL](MANUAL.md). La sección 9 explica qué hacer si sale «No se pudo abrir el archivo».
 
-1. En el navegador elegido, abre **https://tapqr-temascalcingo.github.io/decorarte-catalogo/panel/**.
-2. Agrega el acceso a la pantalla de inicio:
-   - **Chrome en iPhone:** botón **Compartir** (cuadro con flecha, arriba a la derecha) → **Agregar a pantalla de inicio**.
-   - **Safari en iPhone:** botón **Compartir** → **Agregar a inicio**.
-   - **Android (Chrome):** menú **⋮ → Agregar a la pantalla principal** (o **Instalar app**).
-3. Toca el ícono nuevo. La **primera vez** verá, en este orden:
-   1. **Iniciar sesión con Google** (si no tenía sesión): que entre con el Gmail que agregaste.
-   2. **"Google no verificó esta app"**: tocar **Configuración avanzada** (o "Avanzado") y luego **Ir a Decorarte Panel (no seguro)**.
-      Es normal: es una app propia del catálogo, no publicada para el público.
-   3. **"Decorarte Panel quiere acceder a tu Cuenta de Google"** con la lista de permisos de arriba: tocar **Continuar** o **Permitir**.
-   4. El panel, con **Tus productos**.
-4. Pídele que **agregue un producto con una foto de la cámara**. La primera foto crea en **su** Google Drive una carpeta
-   llamada **Decorarte Catálogo – Fotos**. Explícale que **no debe borrarla**: ahí viven las fotos que ella sube y que se ven
-   en el catálogo.
-5. Enséñale el [MANUAL](MANUAL.md); la sección 9 explica qué hacer si algún día sale «No se pudo abrir el archivo».
-
-## Paso 11. Probar que todo funciona
-
-1. En el panel, cambia el precio de un producto y guarda.
-2. Abre el catálogo y recarga: el cambio se ve en unos segundos.
-3. Desde el catálogo, toca **Lo quiero** en un producto: debe abrirse WhatsApp con el mensaje escrito.
-4. Con la cuenta de la dueña, agrega un producto con foto tomada desde el celular. Se guarda al momento; la tarjeta dice
-   "Subiendo foto…" unos segundos y después la foto aparece en el catálogo.
+Listo. Después haz las [pruebas con una segunda cuenta](#pruebas-con-una-segunda-cuenta).
 
 ---
 
-## Mantenimiento
+## Cómo actualizar el código después
 
-### Actualizar el código de Apps Script
+Cada vez que cambie algún archivo de [`apps-script/`](apps-script/). **Nunca** uses "Nueva implementación" para esto.
 
-Las URL de las dos implementaciones **no cambian** si se actualizan así (con "Gestionar implementaciones", nunca con "Nueva implementación"):
+1. Abre el proyecto **Decorarte Panel** en script.google.com, pega los archivos que cambiaron y guarda.
+2. **API:** confirma que `Implementacion.gs` dice `'api'` y guarda. **Implementar → Gestionar implementaciones** → selecciona
+   **API catálogo** → **lápiz ✏️** → **Versión: Nueva versión** → **Implementar**.
+3. **Comprobación:** abre la URL de la API **sin `?api`** → debe salir `{"version":1,…`.
+4. **Panel:** cambia `Implementacion.gs` a `'panel'` y guarda. **Gestionar implementaciones** → **Panel** → **lápiz ✏️** →
+   **Nueva versión** → **Implementar**. Abre la URL del Panel → debe salir el panel.
+5. Regresa `Implementacion.gs` a `'api'` y guarda.
+6. **Comprobación final:** la URL de la API sin `?api` sigue mostrando `{"version":1,…`.
 
-1. Pega el código nuevo en el editor (los archivos que hayan cambiado) y guarda.
-2. **API catálogo**
-   1. En `Implementacion.gs` deja `const IMPLEMENTACION = 'api';` y guarda.
-   2. **Implementar → Gestionar implementaciones** → selecciona **API catálogo** → ✏️ → Versión: **Nueva versión** → **Implementar**.
-   3. **Comprobación:** abre la URL de la API **sin `?api`**. Debe salir `{"version":1,…}` y **no** una página. Si sale una página, repite este paso con `'api'`.
-3. **Panel**
-   1. En `Implementacion.gs` cambia a `const IMPLEMENTACION = 'panel';` y guarda.
-   2. **Gestionar implementaciones** → **Panel** → ✏️ → Versión: **Nueva versión** → **Implementar**.
-   3. **Comprobación:** abre la URL del panel: debe salir el panel. Si sale texto `{"version":1,…}`, la versión no decía `'panel'`.
-4. Regresa `Implementacion.gs` a `'api'` y guarda.
-5. **Comprobación final:** abre otra vez la URL de la API sin `?api`. Debe seguir saliendo `{"version":1,…}`.
+Las dos URL no cambian, así que `js/config.js` no se toca. Si el cambio modificó `appsscript.json` (permisos), ejecuta
+`instalar` una vez y cada persona verá otra vez la pantalla de permisos al abrir el panel.
 
-Si un cambio modifica `appsscript.json` (los permisos), Google pide autorizar de nuevo: ejecuta `instalar` desde el editor
-y cada persona con acceso verá otra vez la pantalla de permisos al abrir el panel.
+### Si una dirección muestra lo que no debe
+
+| Qué ves | Qué pasó | Qué hacer |
+|---|---|---|
+| La URL de la **API** muestra una página | Esa versión se publicó con `'panel'` | Pon `'api'`, guarda, y en **Gestionar implementaciones → API catálogo → ✏️ → Nueva versión → Implementar**. |
+| La URL del **Panel** muestra `{"version":1,…` | Esa versión se publicó con `'api'` | Pon `'panel'`, guarda, **Gestionar implementaciones → Panel → ✏️ → Nueva versión → Implementar**, y regresa a `'api'`. |
+
+## Qué hacer si edito la hoja a mano
+
+No hace falta editarla: todo se maneja desde el panel. Si aun así cambias algo directo en la hoja, el catálogo **no** se entera
+solo (el proyecto independiente no recibe avisos de la hoja). Para que se vea al momento:
+
+1. Abre el proyecto **Decorarte Panel** en script.google.com.
+2. Elige la función **`publicarCambios`** y toca **▶ Ejecutar**.
+3. En el registro debe salir "Listo: el catálogo ya muestra la información actual de la hoja."
+
+Si no lo haces, el cambio aparece solo cuando vence la caché (máximo 6 horas) o la próxima vez que alguien guarde algo en el panel.
+
+---
+
+## Referencia
+
+### Permisos que pide
+
+Cada cuenta que use el panel (la agencia al instalar y la dueña la primera vez) ve esta lista. El texto exacto puede variar un poco:
+
+| Lo que se ve al autorizar | Original en inglés | Para qué |
+|---|---|---|
+| **Ver, editar, crear y eliminar todas tus hojas de cálculo de Hojas de cálculo de Google** | See, edit, create, and delete all your Google Sheets spreadsheets | Leer y guardar en la hoja del catálogo, y compartirla con las personas con acceso. |
+| **Ver, editar, crear y borrar solo los archivos específicos de Google Drive que uses con esta app** | See, edit, create, and delete only the specific Google Drive files you use with this app | Crear la hoja y la carpeta de fotos, y subir las fotos. **No** ve ningún otro archivo de Drive. |
+| **Ver la dirección de correo electrónico principal de tu Cuenta de Google** | See your primary Google Account email address | Saber quién entra al panel. |
+
+No se pide "todos tus archivos de Drive", ni "conectarse a un servicio externo", ni "ejecutarse cuando no estás presente".
+
+### Cómo está armado
+
+```
+ Clientes ──► Catálogo (GitHub Pages) ──► "API catálogo" (Apps Script, ejecuta como la agencia) ──lee──► Hoja
+ Dueña (su Gmail) ─► Ícono ─► "Panel" (Apps Script, ejecuta como quien entra) ──escribe──────────────────┘
+```
+
+- **Quién administra** = la cuenta que ejecutó `instalar`. Solo ella cambia la lista de personas con acceso y ejecuta
+  `instalar`, `cargarEjemplos`, `publicarCambios` y `dondeEstaTodo`.
+- **La dueña** tiene la hoja compartida como **Editora** (el panel trabaja con su cuenta). Puede abrirla y cambiar celdas a mano,
+  pero **no puede ver el código** ni compartir la hoja con nadie (paso 19). Si algo se rompe en la hoja,
+  **Archivo → Historial de versiones** permite regresar a una versión anterior.
+- **Fotos:** cada cuenta guarda las fotos que sube en una carpeta **de su propio Drive** ("Decorarte Catálogo – Fotos").
+  Las de la dueña viven en el Drive de ella; si las borra, en el catálogo sale el logo en su lugar.
 
 ### Personas con acceso
 
-- **Agregar o quitar:** solo desde **Ajustes → Personas con acceso al panel**, con la cuenta de la agencia (paso 9). El panel
-  comparte o retira la hoja en ese momento y muestra el resultado por persona.
-- **Si alguien con acceso ve "Ya casi puedes entrar":** su correo está en la lista pero no tiene la hoja compartida (por
-  ejemplo, alguien la quitó a mano en Compartir). Vuelve a guardar la lista en el panel o ejecuta `instalar`: le vuelve a compartir la hoja.
-- **Fotos de cada persona:** por el permiso `drive.file`, cada cuenta guarda las fotos que sube en una carpeta **de su propio
-  Drive** ("Decorarte Catálogo – Fotos"). Las de la dueña viven en el Drive de ella. Si ella las borra o cierra su cuenta,
-  esas fotos dejan de verse en el catálogo (sale el logo en su lugar).
+- **Agregar o quitar:** Panel → **Ajustes → Personas con acceso al panel**, con la cuenta de la agencia. El panel comparte o
+  retira la hoja en ese momento y muestra el resultado por persona. La cuenta de la agencia no se puede quitar.
+- **"Ya casi puedes entrar":** la persona está en la lista pero sin la hoja (alguien la quitó a mano en Compartir). Guarda otra vez
+  la lista en el panel o ejecuta `instalar`.
 
-### Si alguien edita la hoja a mano
+### Dónde está cada cosa (para distinguir instalaciones)
 
-No hace falta, pero si pasa, el catálogo se actualiza solo. Si algo no se refleja, usa el menú **Decorarte → Publicar cambios hechos a mano en la hoja**
-(solo la cuenta que instaló). Si el menú **Decorarte** no aparece, ejecuta `publicarCambios` desde el editor.
+En el proyecto **Decorarte Panel**, ejecuta **`dondeEstaTodo`**. El registro muestra el número de proyecto, el enlace de **su**
+hoja y el de **su** carpeta de fotos.
+
+| Dónde | Instalación nueva (definitiva) | Instalación de prueba |
+|---|---|---|
+| script.google.com → Mis proyectos | **Decorarte Panel**, sin hoja "contenedora" | **Decorarte Panel – PRUEBA**, con ícono de hoja de cálculo (está dentro de la hoja) |
+| Google Drive | **Decorarte – Catálogo** y **Decorarte Catálogo – Fotos** | **PRUEBA – Decorarte – Catálogo** y **PRUEBA – Decorarte Catálogo – Fotos** (si las renombraste) |
+| Direcciones | Las que están en `js/config.js` | Las anteriores |
+
+### Borrar la instalación de prueba
+
+Hazlo **solo después** de que el catálogo público ya use las direcciones nuevas (paso 32) y funcione.
+
+1. Confirma que [`js/config.js`](js/config.js) tiene las URL **nuevas** (compáralas con las del paso 22 y 26).
+2. Abre la hoja **PRUEBA – Decorarte – Catálogo** → **Extensiones → Apps Script** (proyecto "Decorarte Panel – PRUEBA") →
+   **Implementar → Gestionar implementaciones** → **Archivar** cada una de sus implementaciones. Sus direcciones se apagan.
+3. Abre el catálogo público y el panel nuevo: deben seguir funcionando. Si algo falla, **no sigas** y revisa `js/config.js`.
+4. En Google Drive, manda a la papelera **PRUEBA – Decorarte – Catálogo** (eso borra también su código, que vive dentro) y
+   **PRUEBA – Decorarte Catálogo – Fotos**. La segunda cuenta con la que probaste puede borrar su propia carpeta de prueba.
+5. *(Opcional)* En **myaccount.google.com → Seguridad → Conexiones con terceros**, quita el acceso a "Decorarte Panel – PRUEBA"
+   si aparece. Ojo: **no** quites "Decorarte Panel" (la nueva).
+
+La papelera de Drive guarda todo 30 días por si te equivocas.
+
+---
+
+## Pruebas con una segunda cuenta
+
+Hazlas en la instalación nueva, con otra cuenta de Google en otro celular (o en otro navegador sin tu cuenta).
+
+1. **Sin acceso:** con la segunda cuenta, abre la URL del Panel. Debe salir **"Este panel es privado"**.
+2. **Agregar:** con tu cuenta, en Ajustes → Personas con acceso agrega a la segunda cuenta y **Guardar personas**. Debe salir
+   **"✓ Se le compartió la hoja a …"**, y a esa cuenta le llega el correo de aviso de Google.
+3. **Entrar:** con la segunda cuenta, recarga el panel. Verá la pantalla de permisos (paso 39) y luego **Tus productos**.
+4. **Crear con foto:** sube un producto con foto de la cámara. Debe verse en el catálogo público, y en el Drive de esa cuenta debe
+   aparecer **Decorarte Catálogo – Fotos**.
+5. **Editar y borrar** un producto: los cambios se ven en el catálogo.
+6. **No puede cambiar la lista:** con la segunda cuenta, en Ajustes → Personas con acceso, ve la lista sin poder editarla y el aviso
+   "Solo quien administra el catálogo puede agregar personas…" con tu contacto.
+7. **No puede compartir ni ver el código:** con la segunda cuenta, abre la hoja (le llegó por correo). **Compartir** no debe dejarla
+   agregar a nadie. Luego, con esa misma cuenta, entra a **script.google.com**: en **Mis proyectos** y en **Compartidos conmigo**
+   **no** debe aparecer "Decorarte Panel". (No uses Extensiones → Apps Script en la hoja: eso crearía un proyecto vacío nuevo.)
+8. **"Ya casi puedes entrar":** con tu cuenta, en la hoja → **Compartir**, quítale la hoja a mano a la segunda cuenta (sin tocar la
+   lista del panel). Con la segunda cuenta, recarga el panel: debe salir **"Ya casi puedes entrar"** con tu contacto.
+   Luego, con tu cuenta, guarda otra vez la lista en el panel: debe volver a compartírsela.
+9. **Correo inválido:** con tu cuenta, agrega un correo que no sea de Google. Debe salir el aviso rojo y no quedar en la lista.
+10. **Quitar:** con tu cuenta, quita a la segunda cuenta y **Guardar personas**. Debe salir **"✓ Se le quitó el acceso a …"**.
+11. **Ya no entra ni ve la hoja:** con la segunda cuenta, recarga el panel → **"Este panel es privado"**. Abre el enlace de la hoja →
+    Google pide **solicitar acceso**.
+12. **La prueba sigue intacta:** abre la hoja **PRUEBA – Decorarte – Catálogo**: no debe tener ningún cambio de estas pruebas.
 
 ---
 
@@ -277,29 +302,25 @@ No hace falta, pero si pasa, el catálogo se actualiza solo. Si algo no se refle
 
 | Qué pasa | Qué hacer |
 |---|---|
-| El catálogo sigue diciendo "demostración" | Revisa que `endpoint` en `js/config.js` tenga la URL `/exec` y que el commit esté hecho. GitHub Pages tarda 1–2 minutos; recarga sin caché. |
-| El catálogo dice "No pudimos cargar el catálogo" | Abre la URL de la API. Si pide iniciar sesión, la implementación no está en **Cualquier persona**. Si muestra `{"error":…}`, lee el mensaje; casi siempre falta ejecutar `instalar`. |
-| La URL de la API muestra una página | Esa versión se publicó con `Implementacion.gs` en `'panel'`. Sigue "Actualizar el código", paso 2. |
-| La URL del panel muestra `{"version":1,…}` | Esa versión se publicó con `'api'`. Sigue "Actualizar el código", paso 3. |
-| «No se pudo abrir el archivo» (sobre todo en iPhone) | Hay varias cuentas de Google en ese navegador. Usa un navegador con solo la cuenta autorizada (paso 10). |
-| "Ya casi puedes entrar" | La persona está en la lista pero sin la hoja compartida. Guarda otra vez la lista en el panel o ejecuta `instalar`. |
+| El catálogo sigue diciendo "demostración" | Revisa que `endpoint` en `js/config.js` tenga la URL de la API y que el cambio esté publicado. GitHub Pages tarda 1–2 minutos; recarga. |
+| El catálogo dice "No pudimos cargar el catálogo" | Abre la URL de la API. Si pide iniciar sesión, la implementación no está en **Cualquier persona**. Si muestra `{"error":…}`, casi siempre falta ejecutar `instalar`. |
+| «No se pudo abrir el archivo» (sobre todo en iPhone) | Varias cuentas de Google en ese navegador. Usa un navegador con solo la cuenta autorizada (paso 37). |
+| "Ya casi puedes entrar" | La persona está en la lista pero sin la hoja. Guarda otra vez la lista en el panel o ejecuta `instalar`. |
 | "Este panel es privado" | El correo con el que se entró no está en la lista, o el navegador usó otra cuenta. |
 | "No se pudo compartir la hoja con …" | El correo no es una cuenta de Google, o quien guardó no es la cuenta de la agencia. |
-| "Solo quien administra el catálogo puede agregar personas" | Solo la cuenta de la agencia cambia la lista. Es lo esperado para las demás cuentas. |
-| "Solo quien administra el catálogo puede ejecutar esta función" | `instalar`, `cargarEjemplos` y `publicarCambios` solo las ejecuta la cuenta que instaló. |
-| Una foto dice "No se subió la foto" | Señal débil. Toca **Reintentar** cuando haya mejor señal; el panel también reintenta solo al recuperar la conexión. |
-| Una foto no se ve en el catálogo | Revisa en el Drive de quien la subió que la foto esté en "Decorarte Catálogo – Fotos" y no en la papelera. Mientras tanto, el catálogo muestra el logo. |
-| `instalar` se cortó | Vuelve a ejecutarla: continúa donde se quedó. |
-| Cambié el código y no se nota | Falta publicar una **Nueva versión** en la implementación correspondiente (ver "Actualizar el código"). |
+| "Solo quien administra el catálogo puede…" | Solo la cuenta que instaló cambia la lista o ejecuta `instalar`, `cargarEjemplos`, `publicarCambios` y `dondeEstaTodo`. |
+| "Falta ejecutar instalar" | Ejecuta `instalar` en el proyecto **Decorarte Panel**. |
+| Una foto dice "No se subió la foto" | Señal débil. **Reintentar** cuando haya mejor señal; el panel también reintenta solo. |
+| Una foto no se ve en el catálogo | Revisa en el Drive de quien la subió que esté en "Decorarte Catálogo – Fotos" y no en la papelera. |
+| Edité la hoja a mano y no se ve | Ejecuta `publicarCambios` (ver [Qué hacer si edito la hoja a mano](#qué-hacer-si-edito-la-hoja-a-mano)). |
+| Cambié el código y no se nota | Falta **Nueva versión** en **Gestionar implementaciones** (ver [Cómo actualizar el código después](#cómo-actualizar-el-código-después)). |
 
 ## Límites del plan gratuito
 
-Sobran para una tienda local:
-
 - **GitHub Pages:** hasta unos 100 GB de tráfico al mes. El catálogo pesa menos de 200 KB, sin contar fotos.
-- **Apps Script (cuenta personal):** el límite que importa es de unas 30 ejecuciones **al mismo tiempo**. La API responde desde caché (CacheService), y cada teléfono guarda su propia copia.
-- **Google Drive:** 15 GB compartidos con Gmail en cada cuenta. Cada foto reducida pesa como máximo 250 KB, o sea, decenas de miles de fotos.
-- **App no verificada:** Google permite hasta 100 cuentas distintas en una app propia sin verificar; para este uso sobra.
+- **Apps Script (cuenta personal):** unas 30 ejecuciones **al mismo tiempo**. La API responde desde caché y cada teléfono guarda su propia copia.
+- **Google Drive:** 15 GB por cuenta. Cada foto reducida pesa como máximo 250 KB.
+- **App no verificada:** Google permite hasta 100 cuentas distintas; para este uso sobra.
 
 ## Para desarrolladores
 
@@ -313,6 +334,6 @@ npm run capturas                  # regenera docs/capturas/ para el MANUAL.md
 npm run ejemplos                  # regenera apps-script/Ejemplos.gs desde datos/demo.json
 ```
 
-`/panel-local/` corre el **mismo** `Codigo.gs` y los mismos HTML del panel en el navegador, sobre un simulador en memoria de la hoja
-(con quién la tiene compartida), Drive (con las reglas de `drive.file`) y la caché (`tests/simulador/`).
+`/panel-local/` corre el **mismo** `Codigo.gs` y los mismos HTML del panel en el navegador, sobre un simulador en memoria de
+las hojas (con quién las tiene compartidas), Drive (con las reglas de `drive.file` por proyecto) y la caché (`tests/simulador/`).
 Parámetros: `?implementacion=api`, `?usuario=correo`, `?invitar=correo,correo`, `?sinHoja=correo`.

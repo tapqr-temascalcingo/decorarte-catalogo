@@ -5,6 +5,10 @@
  *
  * Sirve en Node (pruebas, con vm) y en el navegador (panel local para capturas).
  *
+ * El proyecto es independiente (no ligado a la hoja): getActiveSpreadsheet() da null y la hoja se
+ * abre por su ID. Puede haber varias hojas (por ejemplo, la de una instalación de prueba anterior).
+ * Drive con drive.file: cada cuenta ve solo lo que creó con ESTE proyecto (estado.proyecto).
+ *
  * Quién usa el script:
  *   estado.usuario      correo de la sesión ('' = sin sesión)       -> Session.getActiveUser()
  *   estado.ejecutaComo  'usuario' (implementación Panel) o 'propietario' (API catálogo / editor)
@@ -20,7 +24,7 @@
       archivosHtml: opciones.archivosHtml || {},
       contador: 0,
       fallas: {}, // nombre de operación -> número de veces que debe fallar (para simular cortes)
-      editores: new Set(),               // cuentas con la hoja compartida como Editor
+      proyecto: opciones.proyecto || 'proyecto-definitivo', // ID del proyecto de Apps Script
       editoresPuedenCompartir: false,    // la casilla que se desmarca en la hoja (INSTALACION.md)
       correosCompartidos: [],            // avisos que Google mandaría al compartir
     };
@@ -95,57 +99,75 @@
       return encadenable(hoja);
     }
 
-    const hojas = [crearHoja('Hoja 1')];
-    // Solo la dueña de la hoja y quienes la tienen compartida pueden leerla (como en Google).
-    const tieneAcceso = () => efectivo() === estado.propietario || estado.editores.has(efectivo());
-    function exigirAcceso() {
-      if (!tieneAcceso()) throw new Error('Exception: No cuentas con el permiso necesario para acceder al documento solicitado.');
-    }
-    function exigirCompartir() {
-      exigirAcceso();
-      if (efectivo() !== estado.propietario && !estado.editoresPuedenCompartir) {
-        throw new Error('Exception: Access denied: You do not have permission to share this document.');
-      }
-    }
+    // Hojas de cálculo: cada una con su dueña y sus editores. Solo ellos pueden abrirla (como en Google).
+    const libros = {};
     const usuario = (correo) => ({ getEmail: () => correo });
-    const libro = encadenable({
-      getId: () => 'libro-de-prueba',
-      getSheetByName: (n) => { exigirAcceso(); return hojas.find((h) => h.getName() === n) || null; },
-      getSheets: () => { exigirAcceso(); return hojas.slice(); },
-      getOwner: () => usuario(estado.propietario),
-      getEditors: () => { exigirAcceso(); return [...estado.editores].map(usuario); },
-      addEditor(correo) {
-        exigirCompartir();
-        correo = String(correo).toLowerCase();
-        if (!/@/.test(correo) || /@no-es-google\.test$/.test(correo)) throw new Error('Exception: Invalid email: ' + correo);
-        if (correo !== estado.propietario) { estado.editores.add(correo); estado.correosCompartidos.push(correo); }
-        return libro;
-      },
-      removeEditor(correo) {
-        exigirCompartir();
-        estado.editores.delete(String(correo).toLowerCase());
-        return libro;
-      },
-      insertSheet(n) {
+    function crearLibro(id, nombre, dueno) {
+      const hojas = [crearHoja('Hoja 1')];
+      const editores = new Set();
+      const tieneAcceso = () => efectivo() === dueno || editores.has(efectivo());
+      function exigirAcceso() {
+        if (!tieneAcceso()) throw new Error('Exception: No cuentas con el permiso necesario para acceder al documento solicitado.');
+      }
+      function exigirCompartir() {
         exigirAcceso();
-        quizaFallar('insertSheet');
-        if (hojas.some((h) => h.getName() === n)) throw new Error(`Ya existe una hoja con el nombre "${n}"`);
-        const h = crearHoja(n);
-        hojas.push(h);
-        return h;
-      },
-      deleteSheet(h) { hojas.splice(hojas.indexOf(h), 1); },
-      toast(m) { estado.ultimoAviso = m; },
-    });
+        if (efectivo() !== dueno && !estado.editoresPuedenCompartir) {
+          throw new Error('Exception: Access denied: You do not have permission to share this document.');
+        }
+      }
+      const libro = encadenable({
+        _editores: editores,
+        _dueno: dueno,
+        _tieneAcceso: tieneAcceso,
+        getId: () => id,
+        getName: () => nombre,
+        getUrl: () => 'https://docs.google.com/spreadsheets/d/' + id + '/edit',
+        getSheetByName: (n) => { exigirAcceso(); return hojas.find((h) => h.getName() === n) || null; },
+        getSheets: () => { exigirAcceso(); return hojas.slice(); },
+        getOwner: () => usuario(dueno),
+        getEditors: () => { exigirAcceso(); return [...editores].map(usuario); },
+        addEditor(correo) {
+          exigirCompartir();
+          correo = String(correo).toLowerCase();
+          if (!/@/.test(correo) || /@no-es-google\.test$/.test(correo)) throw new Error('Exception: Invalid email: ' + correo);
+          if (correo !== dueno) { editores.add(correo); estado.correosCompartidos.push(correo); }
+          return libro;
+        },
+        removeEditor(correo) {
+          exigirCompartir();
+          editores.delete(String(correo).toLowerCase());
+          return libro;
+        },
+        insertSheet(n) {
+          exigirAcceso();
+          quizaFallar('insertSheet');
+          if (hojas.some((h) => h.getName() === n)) throw new Error(`Ya existe una hoja con el nombre "${n}"`);
+          const h = crearHoja(n);
+          hojas.push(h);
+          return h;
+        },
+        deleteSheet(h) { hojas.splice(hojas.indexOf(h), 1); },
+        toast() { throw new Error('toast() solo existe en scripts ligados a la hoja'); },
+      });
+      libros[id] = libro;
+      return libro;
+    }
+    /** La hoja de esta instalación (la que dice la propiedad idHoja). */
+    const libroActual = () => libros[propiedades.idHoja] || null;
+    Object.defineProperty(estado, 'editores', { get: () => (libroActual() ? libroActual()._editores : new Set()) });
 
     const SpreadsheetApp = {
-      getActiveSpreadsheet: () => libro,
-      openById: () => libro,
+      getActiveSpreadsheet: () => null, // proyecto independiente: no hay hoja "activa"
+      openById(id) {
+        const l = libros[id];
+        if (!l) throw new Error('Exception: Unexpected error while getting the method or property openById on object SpreadsheetApp.');
+        l.getSheets(); // exige acceso
+        return l;
+      },
       flush() {},
-      getUi: () => encadenable({
-        alert() { throw new Error('alert() bloquearía la ejecución: no se debe usar'); },
-      }),
+      getUi: () => { throw new Error('Cannot call SpreadsheetApp.getUi() from this context.'); },
     };
+    const ScriptApp = { getScriptId: () => estado.proyecto };
 
     /* ---------- Drive (servicio avanzado v3, reglas de drive.file) ---------- */
     // drive.file: cada cuenta solo puede ver y modificar los archivos que creó con esta app.
@@ -156,7 +178,7 @@
     }
     function accesible(id) {
       const a = archivos[id];
-      if (!a || a.dueno !== efectivo()) {
+      if (!a || a.dueno !== efectivo() || a.app !== estado.proyecto) {
         const e = new Error(`GoogleJsonResponseException: File not found: ${id}.`);
         throw e;
       }
@@ -165,7 +187,8 @@
     const Drive = {
       Files: {
         create(recurso, blob) {
-          quizaFallar(recurso.mimeType === 'application/vnd.google-apps.folder' ? 'crearCarpeta' : 'crearArchivo');
+          quizaFallar(recurso.mimeType === 'application/vnd.google-apps.folder' ? 'crearCarpeta'
+            : recurso.mimeType === 'application/vnd.google-apps.spreadsheet' ? 'crearHoja' : 'crearArchivo');
           if (recurso.parents) recurso.parents.forEach(accesible);
           const id = nuevoId();
           archivos[id] = {
@@ -176,9 +199,11 @@
             appProperties: recurso.appProperties || {},
             bytes: blob ? blob.getBytes() : null,
             dueno: efectivo(),
+            app: estado.proyecto,
             compartido: false,
             enPapelera: false,
           };
+          if (recurso.mimeType === 'application/vnd.google-apps.spreadsheet') crearLibro(id, recurso.name, efectivo());
           return { id, name: recurso.name };
         },
         get(id) {
@@ -192,11 +217,12 @@
         },
         list(opciones) {
           const q = opciones.q || '';
-          const clave = /appProperties has \{ key='(\w+)' and value='(\w+)' \}/.exec(q);
-          const files = Object.values(archivos).filter((a) => a.dueno === efectivo()
+          const claves = [...q.matchAll(/appProperties has \{ key='([\w-]+)' and value='([\w-]+)' \}/g)];
+          const tipo = /mimeType='([^']+)'/.exec(q);
+          const files = Object.values(archivos).filter((a) => a.dueno === efectivo() && a.app === estado.proyecto
             && (!/trashed=false/.test(q) || !a.enPapelera)
-            && (!/mimeType='application\/vnd\.google-apps\.folder'/.test(q) || a.tipo === 'application/vnd.google-apps.folder')
-            && (!clave || a.appProperties[clave[1]] === clave[2]))
+            && (!tipo || a.tipo === tipo[1])
+            && claves.every((k) => a.appProperties[k[1]] === k[2]))
             .slice(0, opciones.pageSize || 100)
             .map((a) => ({ id: a.id }));
           return { files };
@@ -279,10 +305,25 @@
 
     return {
       // globales de Apps Script
-      SpreadsheetApp, Drive, CacheService, PropertiesService, Session, LockService, Utilities,
-      ContentService, HtmlService, Logger: { log() {} },
+      SpreadsheetApp, ScriptApp, Drive, CacheService, PropertiesService, Session, LockService, Utilities,
+      ContentService, HtmlService,
+      Logger: { log(m) { estado.ultimoAviso = String(m); (estado.registro || (estado.registro = [])).push(String(m)); } },
       // para inspeccionar desde las pruebas
-      __simulador: { estado, libro, archivos, memoriaCache, propiedades, propiedadesUsuario },
+      __simulador: {
+        estado, archivos, libros, memoriaCache, propiedades, propiedadesUsuario,
+        get libro() { return libroActual(); },
+        /** Crea la hoja y la carpeta de OTRA instalación (otro proyecto) con los mismos nombres. */
+        crearInstalacionVieja(proyecto) {
+          const antes = { proyecto: estado.proyecto, usuario: estado.usuario, ejecutaComo: estado.ejecutaComo };
+          Object.assign(estado, { proyecto, usuario: estado.propietario, ejecutaComo: 'usuario' });
+          try {
+            const hoja = Drive.Files.create({ name: 'Decorarte – Catálogo', mimeType: 'application/vnd.google-apps.spreadsheet', appProperties: { decorarte: 'hoja' } }).id;
+            const carpeta = Drive.Files.create({ name: 'Decorarte Catálogo – Fotos', mimeType: 'application/vnd.google-apps.folder', appProperties: { decorarte: 'fotos' } }).id;
+            libros[hoja].insertSheet('Productos').appendRow(['ID', 'Nombre']).appendRow(['viejo1', 'Producto de la prueba']);
+            return { hoja, carpeta };
+          } finally { Object.assign(estado, antes); }
+        },
+      },
     };
   }
 
