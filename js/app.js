@@ -141,7 +141,10 @@ function renderPestanas() {
 }
 
 function renderOcasiones() {
-  const lista = ocasionesConProductos(estado.datos, estado.busqueda ? '' : estado.categoria);
+  // Los filtros por ocasión son para regalos; en Servicios no se muestran ni filtran.
+  const enServicios = !estado.busqueda && tipoDeCategoria(estado.categoria, estado.datos.config) === 'servicios';
+  if (enServicios) estado.ocasion = '';
+  const lista = enServicios ? [] : ocasionesConProductos(estado.datos, estado.busqueda ? '' : estado.categoria);
   const chips = [{ id: '', nombre: 'Todas', emoji: '✨' }, ...lista];
   $('ocasiones').hidden = lista.length === 0;
   $('ocasiones').innerHTML = chips.map((o) => `

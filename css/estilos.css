@@ -300,6 +300,12 @@ img.sin-foto { object-fit: contain !important; padding: 18%; background: linear-
   animation: aparecer 0.35s ease both;
 }
 .servicio-foto { aspect-ratio: 16 / 10; background: var(--rosa-claro); }
+/* iPhone con iOS 14 o anterior no conoce aspect-ratio: sin esto la foto del servicio quedaba en blanco */
+@supports not (aspect-ratio: 1) {
+  .tarjeta-foto, .detalle-foto { height: 0; padding-bottom: 100%; position: relative; }
+  .servicio-foto { height: 0; padding-bottom: 62.5%; position: relative; }
+  .tarjeta-foto img, .detalle-foto img, .servicio-foto img { position: absolute; inset: 0; }
+}
 .servicio-foto img { width: 100%; height: 100%; object-fit: cover; }
 .servicio-cuerpo { padding: 14px 16px 16px; }
 .servicio-nombre { font-family: var(--serif); font-size: 21px; margin: 0; }

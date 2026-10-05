@@ -67,6 +67,27 @@ test.describe('modo demostración', () => {
     await expect(page).toHaveURL(/cat=servicios/);
   });
 
+  test('en Servicios no hay filtros de ocasión, y la foto del servicio se ve', async ({ page }) => {
+    await page.locator('.chip', { hasText: 'Baby shower' }).click();
+    await page.locator('.pestana', { hasText: 'Servicios' }).click();
+    await expect(page.locator('#ocasiones')).toBeHidden();
+    await expect(page.locator('.servicio')).toHaveCount(1);
+    await expect(page).not.toHaveURL(/ocasion=/);
+    const foto = page.locator('.servicio-foto img');
+    await expect(foto).not.toHaveClass(/sin-foto/);
+    const caja = await foto.boundingBox();
+    expect(caja.height).toBeGreaterThan(150);
+    expect(await foto.evaluate((i) => i.complete && i.naturalWidth)).toBe(600);
+    await page.locator('.pestana', { hasText: 'Regalos' }).click();
+    await expect(page.locator('#ocasiones')).toBeVisible();
+  });
+
+  test('un enlace viejo con ?cat=servicios&ocasion= no esconde el servicio', async ({ page }) => {
+    await page.goto('./?cat=servicios&ocasion=dia-del-padre');
+    await expect(page.locator('.servicio')).toHaveCount(1);
+    await expect(page.locator('#ocasiones')).toBeHidden();
+  });
+
   test('buscador sin acentos y mensaje cuando no hay resultados', async ({ page }) => {
     await page.fill('#buscar', 'panales');
     await expect(tarjetas(page)).toHaveCount(1);
